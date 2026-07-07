@@ -1,0 +1,2 @@
+- [AMS Supabase Architecture](ams-supabase-arch.md) — uses Supabase client directly (no Orval); service-role in Express only; vite define maps secrets to VITE_ vars
+- [AMS Signup Race Fix](ams-signup-race.md) — SIGNED_IN fires before /api/agency/setup inserts rows; fix is explicit refreshProfile() after setup
