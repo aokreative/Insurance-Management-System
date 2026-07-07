@@ -580,6 +580,94 @@ export function useCreateRenewalReminder() {
 }
 
 // ============================================================================
+// RENEWALS — extra queries for Phase 3
+// ============================================================================
+
+/** Returns reminder rows grouped by policy_id. Pass the list of visible policy IDs. */
+export function useRenewalReminderCounts(policyIds: string[]) {
+  const { agency, session } = useAuth();
+  return useQuery({
+    queryKey: ['renewal-reminder-counts', agency?.id, policyIds.join(',')],
+    queryFn: async () => {
+      if (!policyIds.length) return {} as Record<string, Array<{ id: string; reminder_date: string; channel: string; notes: string | null; sent_at: string | null }>>;
+      const { data, error } = await supabase
+        .from('renewal_reminders')
+        .select('id, policy_id, reminder_date, channel, notes, sent_at')
+        .eq('agency_id', agency?.id)
+        .in('policy_id', policyIds)
+        .order('reminder_date', { ascending: false });
+      if (error) throw error;
+      // Group by policy_id
+      return (data ?? []).reduce((acc, r) => {
+        if (!acc[r.policy_id]) acc[r.policy_id] = [];
+        acc[r.policy_id].push(r);
+        return acc;
+      }, {} as Record<string, typeof data>);
+    },
+    enabled: !!session && !!agency?.id && policyIds.length > 0,
+  });
+}
+
+/** Active policies already past their expiry date — renewal failures. */
+export function useOverdueRenewals() {
+  const { agency, session } = useAuth();
+  return useQuery({
+    queryKey: ['overdue-renewals', agency?.id],
+    queryFn: async () => {
+      const today = new Date().toISOString().split('T')[0];
+      const { data, error } = await supabase
+        .from('policies')
+        .select(`
+          id, policy_number, expiry_date, premium_amount,
+          client:clients(name, phone, email),
+          insurer:insurers(name),
+          product_line:product_lines(name),
+          agent:users(full_name)
+        `)
+        .eq('agency_id', agency?.id)
+        .eq('status', 'active')
+        .lt('expiry_date', today)
+        .order('expiry_date', { ascending: true });
+      if (error) throw error;
+      return ((data ?? []) as any[]).map((p: any) => ({
+        ...p,
+        days_overdue: Math.floor((Date.now() - new Date(p.expiry_date).getTime()) / 86_400_000),
+      }));
+    },
+    enabled: !!session && !!agency?.id,
+  });
+}
+
+// ============================================================================
+// COMMISSIONS — bulk action for Phase 3
+// ============================================================================
+
+/** Mark multiple pending/overdue commissions as received in one operation. */
+export function useBulkMarkCommissionsReceived() {
+  const queryClient = useQueryClient();
+  const { agency } = useAuth();
+  return useMutation({
+    mutationFn: async (ids: string[]) => {
+      if (!ids.length) throw new Error('No ids');
+      if (!agency?.id) throw new Error('No agency');
+      const today = new Date().toISOString().split('T')[0];
+      const { error } = await supabase
+        .from('commission_transactions')
+        .update({ status: 'received', received_date: today })
+        .in('id', ids)
+        .eq('agency_id', agency.id)
+        .in('status', ['pending', 'overdue']);
+      if (error) throw error;
+      return ids;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['commissions'] });
+      queryClient.invalidateQueries({ queryKey: ['policies'] });
+    },
+  });
+}
+
+// ============================================================================
 // USERS (AGENTS)
 // ============================================================================
 
