@@ -98,7 +98,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setProfile(null);
         setAgency(null);
         const path = window.location.pathname;
-        if (path !== '/login' && path !== '/register') {
+        if (path !== '/login' && path !== '/register' && path !== '/seed') {
           setLocation('/login');
         }
       }

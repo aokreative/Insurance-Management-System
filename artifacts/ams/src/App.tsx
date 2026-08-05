@@ -7,6 +7,7 @@ import { AppLayout } from '@/layouts/AppLayout';
 import NotFound from '@/pages/not-found';
 
 import Login from '@/pages/login';
+import Seed from '@/pages/seed';
 import Dashboard from '@/pages/dashboard';
 import Clients from '@/pages/clients';
 import ClientDetail from '@/pages/client-detail';
@@ -37,8 +38,9 @@ const ProtectedRoute = ({ component: Component }: { component: React.ComponentTy
 function Router() {
   return (
     <Switch>
-      <Route path="/" component={() => <Redirect to="/dashboard" />} />
+      <Route path="~^/$" component={() => <Redirect to="/dashboard" />} />
       <Route path="/login" component={Login} />
+      <Route path="/seed" component={Seed} />
       
       <Route path="/dashboard" component={() => <ProtectedRoute component={Dashboard} />} />
       <Route path="/clients" component={() => <ProtectedRoute component={Clients} />} />

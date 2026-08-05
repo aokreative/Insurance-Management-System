@@ -316,3 +316,6 @@ BEGIN
   RETURN jsonb_build_object('agency_id', v_agency_id);
 END;
 $$;
+
+-- Allow authenticated users to call this RPC from the browser (SECURITY DEFINER handles privilege escalation)
+GRANT EXECUTE ON FUNCTION public.create_agency_with_owner TO authenticated;
