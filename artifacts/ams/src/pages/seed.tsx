@@ -21,38 +21,70 @@ export default function Seed() {
     setResult(null);
 
     try {
-      // Step 1: Sign up
+      let userId: string | undefined;
+
+      // Step 1: Try signing up
       const { data: authData, error: signUpError } = await supabase.auth.signUp({ email, password });
 
-      let session = authData?.session;
-      let userId = authData?.user?.id;
+      if (signUpError) {
+        // Already registered — sign in to get a valid session
+        if (
+          signUpError.message.toLowerCase().includes('already registered') ||
+          signUpError.message.toLowerCase().includes('user already registered')
+        ) {
+          const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({ email, password });
+          if (signInError) throw new Error(`Sign-in failed: ${signInError.message}`);
+          userId = signInData.user?.id;
+        } else {
+          throw new Error(`Sign-up failed: ${signUpError.message}`);
+        }
+      } else {
+        userId = authData.user?.id;
 
-      // If already registered, sign in instead
-      if (signUpError?.message?.includes('already registered') || signUpError?.message?.includes('User already registered')) {
-        const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({ email, password });
-        if (signInError) throw signInError;
-        session = signInData.session;
-        userId = signInData.user?.id;
-      } else if (signUpError) {
-        throw signUpError;
+        // If session is null after signup (email confirmation required), sign in now
+        if (!authData.session && userId) {
+          const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({ email, password });
+          if (signInError) throw new Error(
+            `Account created but sign-in failed. ` +
+            `Check your Supabase dashboard → Authentication → Email and disable "Confirm email". ` +
+            `Error: ${signInError.message}`
+          );
+          userId = signInData.user?.id ?? userId;
+        }
       }
 
-      if (!userId) throw new Error('Could not get user ID after sign-up.');
+      if (!userId) throw new Error('Could not resolve user ID.');
 
       // Step 2: Check if profile already exists
-      const { data: existingUser } = await supabase
+      const { data: existingUser, error: profileCheckError } = await supabase
         .from('users')
         .select('id, agency_id')
         .eq('id', userId)
         .single();
 
+      // If the table doesn't exist yet, give an actionable message
+      if (profileCheckError && profileCheckError.code !== 'PGRST116') {
+        const msg = profileCheckError.message.toLowerCase();
+        if (msg.includes('does not exist') || msg.includes('relation') || msg.includes('schema')) {
+          throw new Error(
+            'Database tables not found. Please apply the SQL migrations first:\n' +
+            '1. Open your Supabase dashboard → SQL Editor\n' +
+            '2. Run supabase/migrations/001_initial_schema.sql\n' +
+            '3. Run supabase/migrations/002_auto_renewal_reminders.sql\n' +
+            '4. Then come back here and try again.'
+          );
+        }
+        throw new Error(`Profile check failed: ${profileCheckError.message}`);
+      }
+
       if (existingUser) {
+        await supabase.auth.signOut();
         setResult({ status: 'success', message: 'Account already set up — use these credentials to log in.' });
         setLoading(false);
         return;
       }
 
-      // Step 3: Create agency + owner via RPC (SECURITY DEFINER — browser-callable)
+      // Step 3: Create agency + owner via RPC (SECURITY DEFINER, requires active session)
       const { error: rpcError } = await supabase.rpc('create_agency_with_owner', {
         p_auth_user_id: userId,
         p_agency_name: agencyName,
@@ -61,9 +93,16 @@ export default function Seed() {
         p_owner_phone: null,
       });
 
-      if (rpcError) throw rpcError;
+      if (rpcError) {
+        if (rpcError.message.toLowerCase().includes('does not exist') || rpcError.code === '42883') {
+          throw new Error(
+            'Setup function not found. Apply the SQL migrations in your Supabase SQL Editor first, then try again.'
+          );
+        }
+        throw new Error(`Agency setup failed: ${rpcError.message}`);
+      }
 
-      // Sign out so user can log in fresh via the login page
+      // Sign out so user logs in fresh
       await supabase.auth.signOut();
 
       setResult({ status: 'success', message: 'Account created! Use the credentials below to log in.' });
@@ -101,33 +140,47 @@ export default function Seed() {
           </CardHeader>
 
           {result ? (
-            <CardContent className="space-y-4">
-              <div className={`flex items-start gap-3 p-4 rounded-lg border ${result.status === 'success' ? 'bg-green-50 border-green-200 text-green-800' : 'bg-red-50 border-red-200 text-red-800'}`}>
-                {result.status === 'success'
-                  ? <CheckCircle2 className="w-5 h-5 mt-0.5 flex-shrink-0" />
-                  : <AlertCircle className="w-5 h-5 mt-0.5 flex-shrink-0" />}
-                <p className="text-sm">{result.message}</p>
-              </div>
+            <>
+              <CardContent className="space-y-4">
+                <div className={`flex items-start gap-3 p-4 rounded-lg border ${result.status === 'success' ? 'bg-green-50 border-green-200 text-green-800' : 'bg-red-50 border-red-200 text-red-800'}`}>
+                  {result.status === 'success'
+                    ? <CheckCircle2 className="w-5 h-5 mt-0.5 flex-shrink-0" />
+                    : <AlertCircle className="w-5 h-5 mt-0.5 flex-shrink-0" />}
+                  <p className="text-sm whitespace-pre-line">{result.message}</p>
+                </div>
 
-              {result.status === 'success' && (
-                <div className="bg-muted rounded-lg p-4 space-y-2 font-mono text-sm">
-                  <div className="flex justify-between items-center">
+                {result.status === 'success' && (
+                  <div className="bg-muted rounded-lg p-4 space-y-3 font-mono text-sm">
                     <div>
                       <div className="text-muted-foreground text-xs uppercase tracking-wide mb-1">Email</div>
                       <div className="font-medium">{email}</div>
                     </div>
+                    <div>
+                      <div className="text-muted-foreground text-xs uppercase tracking-wide mb-1">Password</div>
+                      <div className="font-medium">{password}</div>
+                    </div>
+                    <Button variant="outline" size="sm" className="w-full mt-1 gap-2" onClick={copyCredentials}>
+                      <Copy className="w-3.5 h-3.5" />
+                      {copied ? 'Copied!' : 'Copy credentials'}
+                    </Button>
                   </div>
-                  <div>
-                    <div className="text-muted-foreground text-xs uppercase tracking-wide mb-1">Password</div>
-                    <div className="font-medium">{password}</div>
-                  </div>
-                  <Button variant="outline" size="sm" className="w-full mt-2 gap-2" onClick={copyCredentials}>
-                    <Copy className="w-3.5 h-3.5" />
-                    {copied ? 'Copied!' : 'Copy credentials'}
+                )}
+
+                {result.status === 'error' && (
+                  <Button variant="outline" className="w-full" onClick={() => setResult(null)}>
+                    Try again
                   </Button>
-                </div>
+                )}
+              </CardContent>
+
+              {result.status === 'success' && (
+                <CardFooter className="pt-0">
+                  <a href="/login" className="w-full">
+                    <Button className="w-full">Go to login →</Button>
+                  </a>
+                </CardFooter>
               )}
-            </CardContent>
+            </>
           ) : (
             <form onSubmit={handleSetup}>
               <CardContent className="space-y-3">
@@ -150,19 +203,11 @@ export default function Seed() {
               </CardContent>
               <CardFooter className="pt-2">
                 <Button type="submit" className="w-full" disabled={loading}>
-                  {loading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
+                  {loading && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
                   Create account & agency
                 </Button>
               </CardFooter>
             </form>
-          )}
-
-          {result?.status === 'success' && (
-            <CardFooter className="pt-0">
-              <a href="/login" className="w-full">
-                <Button className="w-full">Go to login →</Button>
-              </a>
-            </CardFooter>
           )}
         </Card>
       </div>

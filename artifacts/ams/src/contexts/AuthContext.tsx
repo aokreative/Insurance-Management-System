@@ -62,8 +62,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
         const { profile: p, agency: a } = await fetchProfileAndAgency(authSession.user.id);
         if (mounted) {
-          if (p) setProfile(p);
-          if (a) setAgency(a);
+          setProfile(p);
+          setAgency(a);
+          // User authenticated but no agency profile yet — send to seed page
+          if (!p && window.location.pathname !== '/seed') {
+            setLocation('/seed');
+          }
         }
       } else {
         if (mounted) {
