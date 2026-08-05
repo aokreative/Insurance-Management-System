@@ -11,7 +11,8 @@ import {
   Tag, 
   Settings,
   LogOut,
-  Menu
+  Menu,
+  BarChart2
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useQuery } from '@tanstack/react-query';
@@ -62,6 +63,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
       icon: RefreshCcw,
       badge: renewalsCount > 0 ? renewalsCount : undefined
     },
+    { name: 'Reports', path: '/reports', icon: BarChart2 },
     { name: 'Insurers', path: '/insurers', icon: Building2 },
     { name: 'Product Lines', path: '/product-lines', icon: Tag },
     { name: 'Settings', path: '/settings', icon: Settings },

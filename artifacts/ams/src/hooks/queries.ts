@@ -580,6 +580,185 @@ export function useCreateRenewalReminder() {
 }
 
 // ============================================================================
+// REPORTS — archive + chart data hooks (Phase 4 & 5)
+// ============================================================================
+
+/** Saved report records from the reports table */
+export function useReports() {
+  const { agency, session } = useAuth();
+  return useQuery({
+    queryKey: ['reports', agency?.id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('reports')
+        .select('*')
+        .eq('agency_id', agency?.id)
+        .order('year', { ascending: false })
+        .order('month', { ascending: false });
+      if (error) throw error;
+      return data ?? [];
+    },
+    enabled: !!session && !!agency?.id,
+  });
+}
+
+/** Monthly premium + commission volume — last 12 months, aggregated on the client */
+export function useMonthlyPremiumVolume() {
+  const { agency, session } = useAuth();
+  return useQuery({
+    queryKey: ['chart-monthly-premium', agency?.id],
+    queryFn: async () => {
+      const from = new Date();
+      from.setMonth(from.getMonth() - 11);
+      from.setDate(1);
+      const { data, error } = await supabase
+        .from('policies')
+        .select('start_date, premium_amount, commission_expected, commission_received')
+        .eq('agency_id', agency?.id)
+        .gte('start_date', from.toISOString().split('T')[0])
+        .order('start_date');
+      if (error) throw error;
+      const map: Record<string, { month: string; premium: number; expected: number; received: number }> = {};
+      (data ?? []).forEach(p => {
+        const d = new Date(p.start_date);
+        const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+        const label = d.toLocaleDateString('en-KE', { month: 'short', year: '2-digit' });
+        if (!map[key]) map[key] = { month: label, premium: 0, expected: 0, received: 0 };
+        map[key].premium += Number(p.premium_amount) || 0;
+        map[key].expected += Number(p.commission_expected) || 0;
+        map[key].received += Number(p.commission_received) || 0;
+      });
+      return Object.entries(map).sort(([a], [b]) => a.localeCompare(b)).map(([, v]) => v);
+    },
+    enabled: !!session && !!agency?.id,
+  });
+}
+
+/** Policy status breakdown for donut chart */
+export function usePolicyStatusBreakdown() {
+  const { agency, session } = useAuth();
+  return useQuery({
+    queryKey: ['chart-policy-status', agency?.id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('policies')
+        .select('status')
+        .eq('agency_id', agency?.id);
+      if (error) throw error;
+      const counts: Record<string, number> = { active: 0, pending: 0, expired: 0, cancelled: 0 };
+      (data ?? []).forEach(p => { counts[p.status] = (counts[p.status] ?? 0) + 1; });
+      return Object.entries(counts)
+        .filter(([, v]) => v > 0)
+        .map(([name, value]) => ({ name, value }));
+    },
+    enabled: !!session && !!agency?.id,
+  });
+}
+
+/** Top 5 clients by total premium written */
+export function useTopClients() {
+  const { agency, session } = useAuth();
+  return useQuery({
+    queryKey: ['chart-top-clients', agency?.id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('policies')
+        .select('client_id, premium_amount, client:clients(name)')
+        .eq('agency_id', agency?.id);
+      if (error) throw error;
+      const map: Record<string, { name: string; premium: number }> = {};
+      (data as any[] ?? []).forEach((p: any) => {
+        if (!map[p.client_id]) map[p.client_id] = { name: p.client?.name ?? 'Unknown', premium: 0 };
+        map[p.client_id].premium += Number(p.premium_amount) || 0;
+      });
+      return Object.values(map).sort((a, b) => b.premium - a.premium).slice(0, 5);
+    },
+    enabled: !!session && !!agency?.id,
+  });
+}
+
+/** Top 5 insurers by policy count and premium */
+export function useTopInsurers() {
+  const { agency, session } = useAuth();
+  return useQuery({
+    queryKey: ['chart-top-insurers', agency?.id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('policies')
+        .select('insurer_id, premium_amount, insurer:insurers(name)')
+        .eq('agency_id', agency?.id);
+      if (error) throw error;
+      const map: Record<string, { name: string; count: number; premium: number }> = {};
+      (data as any[] ?? []).forEach((p: any) => {
+        if (!map[p.insurer_id]) map[p.insurer_id] = { name: p.insurer?.name ?? 'Unknown', count: 0, premium: 0 };
+        map[p.insurer_id].count += 1;
+        map[p.insurer_id].premium += Number(p.premium_amount) || 0;
+      });
+      return Object.values(map).sort((a, b) => b.count - a.count).slice(0, 5);
+    },
+    enabled: !!session && !!agency?.id,
+  });
+}
+
+/** New clients acquired per month — last 6 months */
+export function useNewClientsPerMonth() {
+  const { agency, session } = useAuth();
+  return useQuery({
+    queryKey: ['chart-new-clients', agency?.id],
+    queryFn: async () => {
+      const from = new Date();
+      from.setMonth(from.getMonth() - 5);
+      from.setDate(1);
+      const { data, error } = await supabase
+        .from('clients')
+        .select('created_at')
+        .eq('agency_id', agency?.id)
+        .gte('created_at', from.toISOString());
+      if (error) throw error;
+      const map: Record<string, { month: string; clients: number }> = {};
+      (data ?? []).forEach(c => {
+        const d = new Date(c.created_at);
+        const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+        const label = d.toLocaleDateString('en-KE', { month: 'short', year: '2-digit' });
+        if (!map[key]) map[key] = { month: label, clients: 0 };
+        map[key].clients += 1;
+      });
+      return Object.entries(map).sort(([a], [b]) => a.localeCompare(b)).map(([, v]) => v);
+    },
+    enabled: !!session && !!agency?.id,
+  });
+}
+
+/** YTD summary KPIs for the reports header */
+export function useYtdSummary() {
+  const { agency, session } = useAuth();
+  return useQuery({
+    queryKey: ['chart-ytd-summary', agency?.id],
+    queryFn: async () => {
+      const jan1 = `${new Date().getFullYear()}-01-01`;
+      const [{ data: policies }, { data: clients }, { data: commRx }] = await Promise.all([
+        supabase.from('policies').select('premium_amount, commission_expected, commission_received, status').eq('agency_id', agency?.id),
+        supabase.from('clients').select('id').eq('agency_id', agency?.id).gte('created_at', jan1),
+        supabase.from('commission_transactions').select('amount').eq('agency_id', agency?.id).eq('status', 'received').gte('created_at', jan1),
+      ]);
+      const totalPremiumYtd = (policies ?? []).filter(p => true).reduce((s, p) => s + (Number(p.premium_amount) || 0), 0);
+      const activePolicies  = (policies ?? []).filter(p => p.status === 'active').length;
+      const commReceivedYtd = (commRx ?? []).reduce((s, c) => s + (Number(c.amount) || 0), 0);
+      const commExpected    = (policies ?? []).reduce((s, p) => s + (Number(p.commission_expected) || 0), 0);
+      const commReceived    = (policies ?? []).reduce((s, p) => s + (Number(p.commission_received) || 0), 0);
+      return {
+        totalPremiumYtd,
+        activePolicies,
+        newClientsYtd: clients?.length ?? 0,
+        commReceivedYtd,
+        collectionRate: commExpected > 0 ? Math.round((commReceived / commExpected) * 1000) / 10 : 0,
+      };
+    },
+    enabled: !!session && !!agency?.id,
+  });
+}
+
+// ============================================================================
 // RENEWALS — extra queries for Phase 3
 // ============================================================================
 

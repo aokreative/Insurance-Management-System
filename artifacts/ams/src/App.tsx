@@ -16,6 +16,7 @@ import Insurers from '@/pages/insurers';
 import ProductLines from '@/pages/product-lines';
 import Commissions from '@/pages/commissions';
 import Renewals from '@/pages/renewals';
+import Reports from '@/pages/reports';
 import Settings from '@/pages/settings';
 
 const queryClient = new QueryClient();
@@ -47,6 +48,7 @@ function Router() {
       <Route path="/policies" component={() => <ProtectedRoute component={Policies} />} />
       <Route path="/commissions" component={() => <ProtectedRoute component={Commissions} />} />
       <Route path="/renewals" component={() => <ProtectedRoute component={Renewals} />} />
+      <Route path="/reports" component={() => <ProtectedRoute component={Reports} />} />
       <Route path="/insurers" component={() => <ProtectedRoute component={Insurers} />} />
       <Route path="/product-lines" component={() => <ProtectedRoute component={ProductLines} />} />
       <Route path="/settings" component={() => <ProtectedRoute component={Settings} />} />
