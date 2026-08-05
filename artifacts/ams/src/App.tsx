@@ -7,7 +7,6 @@ import { AppLayout } from '@/layouts/AppLayout';
 import NotFound from '@/pages/not-found';
 
 import Login from '@/pages/login';
-import Register from '@/pages/register';
 import Dashboard from '@/pages/dashboard';
 import Clients from '@/pages/clients';
 import ClientDetail from '@/pages/client-detail';
@@ -40,7 +39,6 @@ function Router() {
     <Switch>
       <Route path="/" component={() => <Redirect to="/dashboard" />} />
       <Route path="/login" component={Login} />
-      <Route path="/register" component={Register} />
       
       <Route path="/dashboard" component={() => <ProtectedRoute component={Dashboard} />} />
       <Route path="/clients" component={() => <ProtectedRoute component={Clients} />} />

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useLocation, Link } from 'wouter';
+import { useLocation } from 'wouter';
 import { supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -96,12 +96,6 @@ export default function Login() {
                 {loading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
                 Sign in
               </Button>
-              <div className="text-sm text-center text-muted-foreground">
-                Don't have an agency account?{" "}
-                <Link href="/register" className="text-primary font-medium hover:underline">
-                  Set up new agency
-                </Link>
-              </div>
             </CardFooter>
           </form>
         </Card>
