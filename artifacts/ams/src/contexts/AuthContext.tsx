@@ -105,6 +105,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (path !== '/login' && path !== '/register' && path !== '/seed') {
           setLocation('/login');
         }
+
       }
     });
 

@@ -111,9 +111,9 @@ export default function Login() {
                 Sign in
               </Button>
               <p className="text-xs text-center text-muted-foreground">
-                No account yet?{' '}
-                <a href="/seed" className="text-primary font-medium hover:underline">
-                  Create a demo account
+                Don't have an account?{' '}
+                <a href="/register" className="text-primary font-medium hover:underline">
+                  Create your agency
                 </a>
               </p>
             </CardFooter>

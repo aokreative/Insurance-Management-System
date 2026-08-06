@@ -7,6 +7,7 @@ import { AppLayout } from '@/layouts/AppLayout';
 import NotFound from '@/pages/not-found';
 
 import Login from '@/pages/login';
+import Register from '@/pages/register';
 import Seed from '@/pages/seed';
 import Dashboard from '@/pages/dashboard';
 import Clients from '@/pages/clients';
@@ -40,6 +41,7 @@ function Router() {
     <Switch>
       <Route path="~^/$" component={() => <Redirect to="/dashboard" />} />
       <Route path="/login" component={Login} />
+      <Route path="/register" component={Register} />
       <Route path="/seed" component={Seed} />
       
       <Route path="/dashboard" component={() => <ProtectedRoute component={Dashboard} />} />
