@@ -408,15 +408,15 @@ export function useDeletePolicy() {
 // ============================================================================
 
 export function useCommissions(filters?: { status?: string }) {
-  const { agency, session } = useAuth();
+  const { agency, session, profile } = useAuth();
   return useQuery({
-    queryKey: ['commissions', agency?.id, filters],
+    queryKey: ['commissions', agency?.id, profile?.id, filters],
     queryFn: async () => {
       let query = supabase
         .from('commission_transactions')
         .select(`
           *,
-          policy:policies(id, policy_number, client:clients(id, name), insurer:insurers(id, name))
+          policy:policies(id, policy_number, agent_id, client:clients(id, name), insurer:insurers(id, name))
         `)
         .eq('agency_id', agency?.id);
         

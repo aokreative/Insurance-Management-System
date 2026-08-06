@@ -4,11 +4,11 @@ import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
 import { StatCard } from '@/components/StatCard';
 import { FileText, DollarSign, CalendarClock, AlertCircle } from 'lucide-react';
-import { formatCurrency, formatDate, getStatusColor } from '@/lib/utils';
+import { formatCurrency, formatDate } from '@/lib/utils';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { startOfMonth, endOfMonth, addDays, startOfDay } from 'date-fns';
+import { OnboardingChecklist } from '@/components/OnboardingChecklist';
 
 export default function Dashboard() {
   const { agency, session } = useAuth();
@@ -96,6 +96,12 @@ export default function Dashboard() {
         .order('expiry_date', { ascending: true })
         .limit(5);
 
+      // 8. Onboarding counts
+      const [{ count: insurerCount }, { count: clientCount }] = await Promise.all([
+        supabase.from('insurers').select('*', { count: 'exact', head: true }).eq('agency_id', agency.id),
+        supabase.from('clients').select('*', { count: 'exact', head: true }).eq('agency_id', agency.id),
+      ]);
+
       return {
         activeCount: activeCount || 0,
         totalPremium,
@@ -104,7 +110,11 @@ export default function Dashboard() {
         receivedThisMonth,
         overdueCount: overdueCount || 0,
         recentPolicies: recentPolicies || [],
-        upcomingRenewals: upcomingRenewals || []
+        upcomingRenewals: upcomingRenewals || [],
+        // onboarding
+        hasInsurers: (insurerCount || 0) > 0,
+        hasClients: (clientCount || 0) > 0,
+        hasPolicies: (activeCount || 0) > 0,
       };
     },
     enabled: !!session && !!agency?.id,
@@ -118,6 +128,16 @@ export default function Dashboard() {
           Welcome back. Here's what's happening at your agency today.
         </p>
       </div>
+
+      {/* Onboarding checklist — only shown when agency is fresh */}
+      {!isLoading && agency?.id && (!metrics?.hasInsurers || !metrics?.hasClients || !metrics?.hasPolicies) && (
+        <OnboardingChecklist
+          agencyId={agency.id}
+          hasInsurers={metrics?.hasInsurers ?? false}
+          hasClients={metrics?.hasClients ?? false}
+          hasPolicies={metrics?.hasPolicies ?? false}
+        />
+      )}
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
         <StatCard

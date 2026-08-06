@@ -52,6 +52,8 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
     enabled: !!agency?.id && !!session,
   });
 
+  const isAgent = profile?.role === 'agent';
+
   const navItems = [
     { name: 'Dashboard', path: '/dashboard', icon: LayoutDashboard },
     { name: 'Clients', path: '/clients', icon: Users },
@@ -63,10 +65,13 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
       icon: RefreshCcw,
       badge: renewalsCount > 0 ? renewalsCount : undefined
     },
-    { name: 'Reports', path: '/reports', icon: BarChart2 },
-    { name: 'Insurers', path: '/insurers', icon: Building2 },
-    { name: 'Product Lines', path: '/product-lines', icon: Tag },
-    { name: 'Settings', path: '/settings', icon: Settings },
+    // Owner/admin-only items
+    ...(!isAgent ? [
+      { name: 'Reports', path: '/reports', icon: BarChart2 },
+      { name: 'Insurers', path: '/insurers', icon: Building2 },
+      { name: 'Product Lines', path: '/product-lines', icon: Tag },
+      { name: 'Settings', path: '/settings', icon: Settings },
+    ] : []),
   ];
 
   const NavLinks = () => (

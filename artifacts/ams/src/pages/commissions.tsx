@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useAuth } from '@/contexts/AuthContext';
 import { useCommissions, useUpdateCommission, useCreateCommission, usePolicies, useBulkMarkCommissionsReceived } from '@/hooks/queries';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -36,6 +37,9 @@ export default function Commissions() {
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   
+  const { profile } = useAuth();
+  const isAgent = profile?.role === 'agent';
+
   const { data: commissions, isLoading } = useCommissions({ status: statusFilter });
   const { data: policies } = usePolicies();
   const updateCommission = useUpdateCommission();
@@ -192,6 +196,7 @@ export default function Commissions() {
           <p className="text-muted-foreground">Track expected and received commissions.</p>
         </div>
 
+        {!isAgent && (
         <Dialog open={isAddOpen} onOpenChange={(open) => {
           setIsAddOpen(open);
           if (!open) form.reset();
@@ -283,6 +288,7 @@ export default function Commissions() {
             </Form>
           </DialogContent>
         </Dialog>
+        )}
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -331,7 +337,7 @@ export default function Commissions() {
         </div>
       )}
 
-      {selectedIds.size > 0 && (
+      {selectedIds.size > 0 && !isAgent && (
         <div className="sticky top-4 z-10 flex items-center justify-between bg-primary text-primary-foreground px-4 py-3 rounded-md shadow-md">
           <div className="text-sm font-medium">{selectedIds.size} selected</div>
           <div className="space-x-2">
