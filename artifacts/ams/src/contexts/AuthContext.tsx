@@ -64,9 +64,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (mounted) {
           setProfile(p);
           setAgency(a);
-          // User authenticated but no agency profile yet — send to seed page
-          if (!p && window.location.pathname !== '/seed') {
-            setLocation('/seed');
+          // User authenticated but no agency profile yet — send to registration to create one
+          if (!p && window.location.pathname !== '/register') {
+            setLocation('/register');
           }
         }
       } else {
@@ -102,7 +102,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setProfile(null);
         setAgency(null);
         const path = window.location.pathname;
-        if (path !== '/login' && path !== '/register' && path !== '/seed') {
+        if (path !== '/login' && path !== '/register') {
           setLocation('/login');
         }
 
