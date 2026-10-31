@@ -36,6 +36,7 @@ DECLARE
   n    INTEGER;
   expected_a1_reminders INTEGER;
   v_text TEXT;
+  v_num  NUMERIC;
 BEGIN
   -- ---------------------------------------------------------
   -- Fixture (as superuser)
@@ -155,6 +156,21 @@ BEGIN
   GET DIAGNOSTICS n = ROW_COUNT;
   ASSERT n = 0, format('a1 updating agencies: expected 0 rows, got %s', n);
 
+  -- Agent cannot record commission received on own policy
+  BEGIN
+    UPDATE policies SET commission_received = 999 WHERE id = p_a1_1;
+    RAISE EXCEPTION 'FAIL: a1 set commission_received on own policy';
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
+  END;
+
+  -- Agent may insert a policy on own client, but commission_received is forced to 0
+  INSERT INTO policies (agency_id, client_id, insurer_id, product_line_id, agent_id,
+                        policy_number, premium_amount, commission_rate, commission_received,
+                        start_date, expiry_date)
+  VALUES (ag, c_a1_1, ins, pl, a1, 'T006-5', 5000, 10, 500, CURRENT_DATE, CURRENT_DATE + 365)
+  RETURNING commission_received INTO v_num;
+  ASSERT v_num = 0, format('a1 inserted policy commission_received: expected 0, got %s', v_num);
+
   -- Agent may edit own client and own policy
   UPDATE clients SET name = 'A1 Client 1 edited' WHERE id = c_a1_1;
   GET DIAGNOSTICS n = ROW_COUNT;
@@ -174,8 +190,9 @@ BEGIN
   PERFORM set_config('request.jwt.claims', json_build_object('sub', m, 'role','authenticated')::text, true);
   SET LOCAL ROLE authenticated;
   -- 5 clients now: 4 fixture + a1's new client
+  -- 5 policies now: 4 fixture + a1's T006-5
   SELECT count(*) INTO n FROM clients;  ASSERT n = 5, format('m clients: expected 5, got %s', n);
-  SELECT count(*) INTO n FROM policies; ASSERT n = 4, format('m policies: expected 4, got %s', n);
+  SELECT count(*) INTO n FROM policies; ASSERT n = 5, format('m policies: expected 5, got %s', n);
   SELECT count(*) INTO n FROM users;    ASSERT n = 4, format('m users: expected 4, got %s', n);
   SELECT count(*) INTO n FROM reports;  ASSERT n = 1, format('m reports: expected 1, got %s', n);
 
@@ -186,12 +203,18 @@ BEGIN
   UPDATE commission_transactions SET status = 'received' WHERE agency_id = ag;
   GET DIAGNOSTICS n = ROW_COUNT;
   ASSERT n >= 1, format('m marking commissions received: expected >=1 rows, got %s', n);
+
+  UPDATE policies SET commission_received = 1000 WHERE id = p_a1_1;
+  GET DIAGNOSTICS n = ROW_COUNT;
+  ASSERT n = 1, format('m recording commission_received: expected 1 row, got %s', n);
+  SELECT commission_received INTO v_num FROM policies WHERE id = p_a1_1;
+  ASSERT v_num = 1000, format('m recording commission_received: expected 1000, got %s', v_num);
   RESET ROLE;
 
   PERFORM set_config('request.jwt.claims', json_build_object('sub', o, 'role','authenticated')::text, true);
   SET LOCAL ROLE authenticated;
   SELECT count(*) INTO n FROM clients;  ASSERT n = 5, format('o clients: expected 5, got %s', n);
-  SELECT count(*) INTO n FROM policies; ASSERT n = 4, format('o policies: expected 4, got %s', n);
+  SELECT count(*) INTO n FROM policies; ASSERT n = 5, format('o policies: expected 5, got %s', n);
   SELECT count(*) INTO n FROM users;    ASSERT n = 4, format('o users: expected 4, got %s', n);
 
   UPDATE agencies SET name = 'Test Agency 006 renamed' WHERE id = ag;
