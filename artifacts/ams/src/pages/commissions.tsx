@@ -60,7 +60,7 @@ export default function Commissions() {
 
   const filteredCommissions = commissions?.filter(c => 
     c.policy?.policy_number.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    c.policy?.client?.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    c.policy?.client?.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
     c.policy?.insurer?.name.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
