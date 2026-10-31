@@ -223,6 +223,16 @@ BEGIN
   RESET ROLE;
 
   -- ---------------------------------------------------------
+  -- No JWT (SQL editor / service_role / cron): commission guard passes
+  -- ---------------------------------------------------------
+  PERFORM set_config('request.jwt.claims', '{}', true);
+  UPDATE policies SET commission_received = 2000 WHERE id = p_a1_1;
+  GET DIAGNOSTICS n = ROW_COUNT;
+  ASSERT n = 1, format('no-JWT recording commission_received: expected 1 row, got %s', n);
+  SELECT commission_received INTO v_num FROM policies WHERE id = p_a1_1;
+  ASSERT v_num = 2000, format('no-JWT recording commission_received: expected 2000, got %s', v_num);
+
+  -- ---------------------------------------------------------
   -- Deactivation
   -- ---------------------------------------------------------
   UPDATE users SET deactivated_at = now() WHERE id = a1;

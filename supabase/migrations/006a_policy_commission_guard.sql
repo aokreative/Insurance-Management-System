@@ -10,6 +10,10 @@
 --   INSERT -> commission_received is forced to 0 (the app already
 --             sends 0, so agents' policy creation keeps working)
 --   UPDATE -> changing commission_received is rejected (42501)
+--
+-- Calls with no JWT (auth.uid() IS NULL: SQL editor, service_role,
+-- cron) are trusted and pass through; anon cannot write policies
+-- because RLS has no anon policy.
 -- ============================================================
 
 CREATE OR REPLACE FUNCTION public.guard_policy_commission_received()
@@ -19,7 +23,7 @@ SECURITY DEFINER
 SET search_path = public
 AS $$
 BEGIN
-  IF NOT public.is_owner_or_manager() THEN
+  IF auth.uid() IS NOT NULL AND NOT public.is_owner_or_manager() THEN
     IF TG_OP = 'INSERT' THEN
       NEW.commission_received := 0;
     ELSIF NEW.commission_received IS DISTINCT FROM OLD.commission_received THEN
