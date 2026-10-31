@@ -317,13 +317,13 @@ export function useCreatePolicy() {
       if (!agency?.id) throw new Error('No agency');
       
       const expected = (policy.premium_amount * policy.commission_rate) / 100;
-      
+
+      // commission_expected is a generated column in Postgres; never send it.
       const { data, error } = await supabase
         .from('policies')
-        .insert({ 
-          ...policy, 
+        .insert({
+          ...policy,
           agency_id: agency.id,
-          commission_expected: expected,
           commission_received: 0
         })
         .select()
@@ -354,18 +354,13 @@ export function useUpdatePolicy() {
   const queryClient = useQueryClient();
   
   return useMutation({
-    mutationFn: async ({ id, ...policy }: Partial<Policy> & { id: string }) => {
-      // Recompute expected if premium or rate changes
-      let expected;
-      if (policy.premium_amount !== undefined && policy.commission_rate !== undefined) {
-        expected = (policy.premium_amount * policy.commission_rate) / 100;
-      }
-      
+    mutationFn: async ({ id, commission_expected: _generated, ...policy }: Partial<Policy> & { id: string }) => {
+      // commission_expected is a generated column (premium * rate / 100) that
+      // Postgres recomputes itself, so it is stripped from the update.
       const { data, error } = await supabase
         .from('policies')
         .update({
           ...policy,
-          ...(expected !== undefined ? { commission_expected: expected } : {}),
           updated_at: new Date().toISOString()
         })
         .eq('id', id)
