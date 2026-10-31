@@ -207,7 +207,9 @@ $$;
 
 -- ------------------------------------------------------------
 -- 5. revoke_invite(invite_id)
---    Owner: any invite in the agency. Manager: agent invites only.
+--    Owner: any invite in the agency. Manager: only agent invites
+--    they created themselves (invited_by = auth.uid()).
+--    (Applied live as 007a_revoke_invite_own_only.)
 -- ------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.revoke_invite(p_invite_id UUID)
 RETURNS VOID
@@ -234,7 +236,8 @@ BEGIN
     RAISE EXCEPTION 'Invalid or expired invite';
   END IF;
 
-  IF v_role = 'manager' AND v_invite.role <> 'agent' THEN
+  IF v_role = 'manager'
+     AND (v_invite.role <> 'agent' OR v_invite.invited_by IS DISTINCT FROM auth.uid()) THEN
     RAISE EXCEPTION 'You are not allowed to revoke that invite' USING ERRCODE = '42501';
   END IF;
 

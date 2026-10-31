@@ -203,6 +203,14 @@ BEGIN
     GET STACKED DIAGNOSTICS v_text = MESSAGE_TEXT;
     ASSERT v_text = 'You are not allowed to revoke that invite', format('m revoke manager invite: got %s', v_text);
   END;
+  -- a manager may revoke only agent invites they created themselves
+  BEGIN
+    PERFORM public.revoke_invite((inv_agent->>'invite_id')::uuid);
+    RAISE EXCEPTION 'FAIL: m revoked an agent invite created by o';
+  EXCEPTION WHEN insufficient_privilege THEN
+    GET STACKED DIAGNOSTICS v_text = MESSAGE_TEXT;
+    ASSERT v_text = 'You are not allowed to revoke that invite', format('m revoke o''s agent invite: got %s', v_text);
+  END;
   BEGIN
     PERFORM public.revoke_invite((inv_m->>'invite_id')::uuid);
     RAISE EXCEPTION 'FAIL: revoked the same invite twice';
@@ -211,6 +219,11 @@ BEGIN
     ASSERT v_text = 'Invalid or expired invite', format('double revoke: got %s', v_text);
   END;
   RESET ROLE;
+
+  SELECT count(*) INTO n FROM agency_invites WHERE id = (inv_agent->>'invite_id')::uuid AND revoked_at IS NULL;
+  ASSERT n = 1, 'm''s denied revoke must leave o''s agent invite unrevoked';
+  SELECT count(*) INTO n FROM agency_invites WHERE id = (inv_m->>'invite_id')::uuid AND revoked_at IS NOT NULL;
+  ASSERT n = 1, 'm revoking own agent invite: revoked_at not set';
 
   PERFORM set_config('request.jwt.claims', json_build_object('sub', a1, 'role','authenticated')::text, true);
   SET LOCAL ROLE authenticated;
