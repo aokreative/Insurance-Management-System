@@ -33,6 +33,9 @@ DECLARE
   c_a2_1  UUID := gen_random_uuid();   -- a2, one active + one expired policy
   c_a2_2  UUID := gen_random_uuid();   -- a2, one pending policy
   c_other UUID := gen_random_uuid();   -- client of ag2
+  c_m_x   UUID := gen_random_uuid();   -- m's client carrying a2 policies
+  p_mx_active  UUID := gen_random_uuid();   -- agent a2, active, on m's client
+  p_mx_expired UUID := gen_random_uuid();   -- agent a2, expired, on m's client
   p_active    UUID := gen_random_uuid();
   p_pending   UUID := gen_random_uuid();
   p_expired   UUID := gen_random_uuid();
@@ -77,7 +80,8 @@ BEGIN
     (c_mix,   ag,  'individual', 'Mix Client',   a1),
     (c_a2_1,  ag,  'individual', 'A2 Client 1',  a2),
     (c_a2_2,  ag,  'corporate',  'A2 Client 2',  a2),
-    (c_other, ag2, 'individual', 'Other Client', o2);
+    (c_other, ag2, 'individual', 'Other Client', o2),
+    (c_m_x,   ag,  'corporate',  'M Client X',   m);
 
   INSERT INTO policies (id, agency_id, client_id, insurer_id, product_line_id, agent_id,
                         policy_number, premium_amount, commission_rate, commission_received,
@@ -90,7 +94,10 @@ BEGIN
     (gen_random_uuid(), ag, c_a2_1, ins, pl, a2, 'T008-5', 50000, 10, 0, CURRENT_DATE, CURRENT_DATE + 200, 'active',  now() - interval '1 day'),
     (p_a2_exp,    ag, c_a2_1, ins, pl, a2, 'T008-6', 60000, 10, 0,   CURRENT_DATE - 400, CURRENT_DATE - 35, 'expired',   now() - interval '1 day'),
     (gen_random_uuid(), ag, c_a2_2, ins, pl, a2, 'T008-7', 70000, 10, 0, CURRENT_DATE, CURRENT_DATE + 200, 'pending', now() - interval '1 day'),
-    (gen_random_uuid(), ag2, c_other, ins2, pl2, o2, 'T008-8', 80000, 10, 0, CURRENT_DATE, CURRENT_DATE + 200, 'active', now() - interval '1 day');
+    (gen_random_uuid(), ag2, c_other, ins2, pl2, o2, 'T008-8', 80000, 10, 0, CURRENT_DATE, CURRENT_DATE + 200, 'active', now() - interval '1 day'),
+    -- a2's policies on a client assigned to m (an owner/manager may set any agent_id)
+    (p_mx_active,  ag, c_m_x, ins, pl, a2, 'T008-9',  90000, 10, 0, CURRENT_DATE,       CURRENT_DATE + 200, 'active',  now() - interval '1 day'),
+    (p_mx_expired, ag, c_m_x, ins, pl, a2, 'T008-10', 95000, 10, 0, CURRENT_DATE - 400, CURRENT_DATE - 35,  'expired', now() - interval '1 day');
 
   INSERT INTO agency_invites (id, agency_id, email, role, token_hash, invited_by, expires_at, revoked_at) VALUES
     (inv_live,    ag, 'live-008@test.local',    'agent', repeat('1', 64), a2, now() + interval '7 days', NULL),
@@ -386,12 +393,13 @@ BEGIN
   SELECT count(*) INTO n FROM users WHERE id IN (o, a1, a2, o2) AND deactivated_at IS NULL;
   ASSERT n = 4, 'failed removes must not deactivate anyone';
 
-  -- success: a2 owns c_mix (2 movable), c_a2_1 (1 active + 1 expired), c_a2_2 (1 pending)
+  -- success: a2 owns c_mix (2 movable), c_a2_1 (1 active + 1 expired), c_a2_2 (1 pending),
+  -- plus 1 active policy on m's client c_m_x (its expired sibling stays)
   PERFORM set_config('request.jwt.claims', json_build_object('sub', o, 'role','authenticated')::text, true);
   SET LOCAL ROLE authenticated;
   r := public.remove_member(a2, a1);
   ASSERT (r->>'clients_moved')::int = 3, format('remove a2: clients_moved expected 3, got %s', r->>'clients_moved');
-  ASSERT (r->>'policies_moved')::int = 4, format('remove a2: policies_moved expected 4, got %s', r->>'policies_moved');
+  ASSERT (r->>'policies_moved')::int = 5, format('remove a2: policies_moved expected 5, got %s', r->>'policies_moved');
   ASSERT (r->>'invites_revoked')::int = 1, format('remove a2: invites_revoked expected 1, got %s', r->>'invites_revoked');
   BEGIN
     PERFORM public.remove_member(a1, a2);
@@ -415,6 +423,15 @@ BEGIN
   ASSERT n = 1, 'a2''s expired policy should stay with a2';
   SELECT count(*) INTO n FROM clients WHERE id = c_other AND assigned_agent_id = o2;
   ASSERT n = 1, 'other agency client must be untouched';
+  SELECT count(*) INTO n FROM policies WHERE id = p_mx_active AND agent_id = a1 AND updated_at > now() - interval '1 hour';
+  ASSERT n = 1, 'a2''s active policy on m''s client should move to a1 with updated_at bumped';
+  SELECT count(*) INTO n FROM policies WHERE id = p_mx_expired AND agent_id = a2;
+  ASSERT n = 1, 'a2''s expired policy on m''s client should stay with a2';
+  SELECT count(*) INTO n FROM clients WHERE id = c_m_x AND assigned_agent_id = m;
+  ASSERT n = 1, 'm''s client must stay assigned to m';
+  SELECT count(*) INTO n FROM policies
+   WHERE agency_id = ag AND agent_id = a2 AND status IN ('active', 'pending');
+  ASSERT n = 0, format('removed a2 must hold no active/pending policies, got %s', n);
 
   -- invites: only a2's live invite gets revoked
   SELECT count(*) INTO n FROM agency_invites WHERE id = inv_live AND revoked_at IS NOT NULL;

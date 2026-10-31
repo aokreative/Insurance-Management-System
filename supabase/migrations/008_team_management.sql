@@ -12,8 +12,9 @@
 --                                                policies_moved,
 --                                                invites_revoked}
 --     Owner. Reassigns all the member's clients (same rules as
---     reassign_client), revokes their live invites, then sets
---     deactivated_at. Never the Owner.
+--     reassign_client), moves the member's remaining active/pending
+--     policies on other clients too, revokes their live invites,
+--     then sets deactivated_at. Never the Owner.
 --
 -- `users` has no write policies, so these are SECURITY DEFINER.
 -- Callers are identified via current_user_role() /
@@ -157,6 +158,7 @@ DECLARE
   v_client   UUID;
   v_clients  INTEGER := 0;
   v_policies INTEGER := 0;
+  v_swept    INTEGER;
   v_invites  INTEGER;
 BEGIN
   IF v_agency IS NULL OR v_role IS DISTINCT FROM 'owner' THEN
@@ -196,6 +198,19 @@ BEGIN
     v_policies := v_policies + public._reassign_client_unchecked(v_client, p_reassign_to);
     v_clients  := v_clients + 1;
   END LOOP;
+
+  -- Sweep the member's remaining live policies on clients assigned to
+  -- someone else (owners/managers may set any agent_id). Expired and
+  -- cancelled policies stay with the removed member.
+  -- (Applied live as 008a_remove_member_sweeps_policies.)
+  UPDATE policies
+     SET agent_id = p_reassign_to,
+         updated_at = now()
+   WHERE agency_id = v_agency
+     AND agent_id = v_target.id
+     AND status IN ('active', 'pending');
+  GET DIAGNOSTICS v_swept = ROW_COUNT;
+  v_policies := v_policies + v_swept;
 
   UPDATE agency_invites
      SET revoked_at = now()
