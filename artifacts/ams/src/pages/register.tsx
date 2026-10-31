@@ -71,12 +71,11 @@ export default function Register() {
         return;
       }
 
-      // Step 3: Create agency + owner profile via RPC (SECURITY DEFINER)
+      // Step 3: Create agency + owner profile via RPC (SECURITY DEFINER).
+      // The function takes the user id and email from the session, not from us.
       const { error: rpcError } = await supabase.rpc('create_agency_with_owner', {
-        p_auth_user_id: userId,
         p_agency_name: agencyName,
         p_owner_name: ownerName,
-        p_owner_email: email,
         p_owner_phone: null,
       });
 

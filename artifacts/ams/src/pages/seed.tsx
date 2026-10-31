@@ -86,10 +86,8 @@ export default function Seed() {
 
       // Step 3: Create agency + owner via RPC (SECURITY DEFINER, requires active session)
       const { error: rpcError } = await supabase.rpc('create_agency_with_owner', {
-        p_auth_user_id: userId,
         p_agency_name: agencyName,
         p_owner_name: ownerName,
-        p_owner_email: email,
         p_owner_phone: null,
       });
 
