@@ -13,7 +13,7 @@ import { useForm } from 'react-hook-form';
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
 
 export default function Settings() {
-  const { agency, profile } = useAuth();
+  const { agency, profile, isOwnerOrManager } = useAuth();
   const updateAgency = useUpdateAgency();
   const { data: users, isLoading: usersLoading } = useAgencyUsers();
   const { toast } = useToast();
@@ -35,8 +35,6 @@ export default function Settings() {
       }
     });
   };
-
-  const isOwnerOrAdmin = profile?.role === 'owner' || profile?.role === 'admin';
 
   return (
     <div className="space-y-8 max-w-5xl">
@@ -90,7 +88,7 @@ export default function Settings() {
                     render={({ field }) => (
                       <FormItem>
                         <FormLabel>Agency Name</FormLabel>
-                        <FormControl><Input {...field} disabled={!isOwnerOrAdmin} /></FormControl>
+                        <FormControl><Input {...field} disabled={!isOwnerOrManager} /></FormControl>
                         <FormMessage />
                       </FormItem>
                     )}
@@ -102,7 +100,7 @@ export default function Settings() {
                       render={({ field }) => (
                         <FormItem>
                           <FormLabel>General Email</FormLabel>
-                          <FormControl><Input type="email" {...field} disabled={!isOwnerOrAdmin} /></FormControl>
+                          <FormControl><Input type="email" {...field} disabled={!isOwnerOrManager} /></FormControl>
                           <FormMessage />
                         </FormItem>
                       )}
@@ -113,7 +111,7 @@ export default function Settings() {
                       render={({ field }) => (
                         <FormItem>
                           <FormLabel>Phone Number</FormLabel>
-                          <FormControl><Input {...field} disabled={!isOwnerOrAdmin} /></FormControl>
+                          <FormControl><Input {...field} disabled={!isOwnerOrManager} /></FormControl>
                           <FormMessage />
                         </FormItem>
                       )}
@@ -125,12 +123,12 @@ export default function Settings() {
                     render={({ field }) => (
                       <FormItem>
                         <FormLabel>Physical Address</FormLabel>
-                        <FormControl><Input {...field} disabled={!isOwnerOrAdmin} /></FormControl>
+                        <FormControl><Input {...field} disabled={!isOwnerOrManager} /></FormControl>
                         <FormMessage />
                       </FormItem>
                     )}
                   />
-                  {isOwnerOrAdmin && (
+                  {isOwnerOrManager && (
                     <Button type="submit" disabled={updateAgency.isPending}>
                       {updateAgency.isPending ? "Saving..." : "Save Changes"}
                     </Button>
@@ -140,7 +138,7 @@ export default function Settings() {
             </CardContent>
           </Card>
 
-          {isOwnerOrAdmin && (
+          {isOwnerOrManager && (
             <Card>
               <CardHeader className="flex flex-row items-center justify-between">
                 <div>

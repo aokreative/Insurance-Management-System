@@ -40,7 +40,7 @@ export default function Policies() {
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   
-  const { profile } = useAuth();
+  const { profile, isOwnerOrManager } = useAuth();
   const { toast } = useToast();
   
   const { data: policies, isLoading } = usePolicies({ 
@@ -273,7 +273,7 @@ export default function Policies() {
                   />
                 </div>
                 
-                {(profile?.role === 'admin' || profile?.role === 'owner') && (
+                {isOwnerOrManager && (
                   <FormField
                     control={form.control}
                     name="agent_id"

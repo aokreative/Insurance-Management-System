@@ -41,7 +41,7 @@ const policySchema = z.object({
 export default function ClientDetail() {
   const [, params] = useRoute('/clients/:id');
   const clientId = params?.id || '';
-  const { profile } = useAuth();
+  const { profile, isOwnerOrManager } = useAuth();
   
   const { data: client, isLoading: isClientLoading } = useClient(clientId);
   const { data: policies, isLoading: isPoliciesLoading } = usePolicies({ clientId });
@@ -308,7 +308,7 @@ export default function ClientDetail() {
                       />
                     </div>
                     
-                    {(profile?.role === 'admin' || profile?.role === 'owner') && (
+                    {isOwnerOrManager && (
                       <FormField
                         control={form.control}
                         name="agent_id"

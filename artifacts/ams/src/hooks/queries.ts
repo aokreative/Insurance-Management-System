@@ -55,7 +55,7 @@ export function useCreateClient() {
   const { agency } = useAuth();
   
   return useMutation({
-    mutationFn: async (client: Omit<Client, 'id' | 'agency_id' | 'created_at'>) => {
+    mutationFn: async (client: Omit<Client, 'id' | 'agency_id' | 'created_at' | 'assigned_agent_id'>) => {
       if (!agency?.id) throw new Error('No agency');
       const { data, error } = await supabase
         .from('clients')

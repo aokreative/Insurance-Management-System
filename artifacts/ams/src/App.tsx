@@ -3,6 +3,8 @@ import { Toaster } from '@/components/ui/toaster';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { Route, Switch, Router as WouterRouter, Redirect } from 'wouter';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { AppLayout } from '@/layouts/AppLayout';
 import NotFound from '@/pages/not-found';
 
@@ -23,10 +25,25 @@ const queryClient = new QueryClient();
 
 // Protected Route Wrapper
 const ProtectedRoute = ({ component: Component }: { component: React.ComponentType }) => {
-  const { session, isLoading } = useAuth();
+  const { session, isLoading, isDeactivated, signOut } = useAuth();
   
   if (isLoading) return <div className="min-h-screen flex items-center justify-center">Loading workspace...</div>;
   if (!session) return <Redirect to="/login" />;
+  if (isDeactivated) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background p-4">
+        <Card className="w-full max-w-md text-center">
+          <CardHeader>
+            <CardTitle>Your access to this agency has been removed</CardTitle>
+            <CardDescription>Ask the agency owner if you think this is a mistake.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button onClick={() => { void signOut(); }}>Sign out</Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
   
   return (
     <AppLayout>

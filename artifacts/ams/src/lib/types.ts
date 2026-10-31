@@ -16,7 +16,7 @@ export interface Agency {
   created_at: string;
 }
 
-export type UserRole = 'owner' | 'admin' | 'agent';
+export type UserRole = 'owner' | 'manager' | 'agent';
 
 export interface AgencyUser {
   id: string;
@@ -25,7 +25,21 @@ export interface AgencyUser {
   full_name: string;
   phone?: string | null;
   email?: string | null;
+  deactivated_at: string | null;
   created_at: string;
+}
+
+export interface AgencyInvite {
+  id: string;
+  agency_id: string;
+  email: string;
+  role: 'manager' | 'agent';
+  invited_by: string;
+  created_at: string;
+  expires_at: string;
+  accepted_at: string | null;
+  accepted_by: string | null;
+  revoked_at: string | null;
 }
 
 export interface Insurer {
@@ -60,6 +74,7 @@ export interface Client {
   kra_pin?: string | null;
   id_or_reg_number?: string | null;
   address?: string | null;
+  assigned_agent_id: string;
   created_at: string;
 }
 

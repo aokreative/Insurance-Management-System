@@ -27,7 +27,7 @@ import {
 } from "@/components/ui/sheet";
 
 export function AppLayout({ children }: { children: React.ReactNode }) {
-  const { agency, profile, signOut, session } = useAuth();
+  const { agency, profile, signOut, session, isOwnerOrManager } = useAuth();
   const [location] = useLocation();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = React.useState(false);
 
@@ -52,8 +52,6 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
     enabled: !!agency?.id && !!session,
   });
 
-  const isAgent = profile?.role === 'agent';
-
   const navItems = [
     { name: 'Dashboard', path: '/dashboard', icon: LayoutDashboard },
     { name: 'Clients', path: '/clients', icon: Users },
@@ -65,13 +63,13 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
       icon: RefreshCcw,
       badge: renewalsCount > 0 ? renewalsCount : undefined
     },
-    // Owner/admin-only items
-    ...(!isAgent ? [
+    // Owner/manager-only items
+    ...(isOwnerOrManager ? [
       { name: 'Reports', path: '/reports', icon: BarChart2 },
       { name: 'Insurers', path: '/insurers', icon: Building2 },
       { name: 'Product Lines', path: '/product-lines', icon: Tag },
-      { name: 'Settings', path: '/settings', icon: Settings },
     ] : []),
+    { name: 'Settings', path: '/settings', icon: Settings },
   ];
 
   const NavLinks = () => (

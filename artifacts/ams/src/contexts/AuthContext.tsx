@@ -7,6 +7,10 @@ interface AuthContextType {
   session: { id: string; email: string } | null;
   profile: AgencyUser | null;
   agency: Agency | null;
+  isOwner: boolean;
+  isOwnerOrManager: boolean;
+  /** True when the owner has removed this user from the agency. */
+  isDeactivated: boolean;
   isLoading: boolean;
   signOut: () => Promise<void>;
   /** Call this after agency setup completes to reload profile+agency without a page refresh. */
@@ -65,7 +69,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setProfile(p);
           setAgency(a);
           // User authenticated but no agency profile yet — send to registration to create one
-          if (!p && window.location.pathname !== '/register') {
+          if (!p && window.location.pathname !== '/register' && window.location.pathname !== '/join') {
             setLocation('/register');
           }
         }
@@ -102,7 +106,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setProfile(null);
         setAgency(null);
         const path = window.location.pathname;
-        if (path !== '/login' && path !== '/register') {
+        if (path !== '/login' && path !== '/register' && path !== '/join') {
           setLocation('/login');
         }
 
@@ -123,8 +127,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setLocation('/login');
   };
 
+  const isOwner = profile?.role === 'owner';
+  const isOwnerOrManager = profile?.role === 'owner' || profile?.role === 'manager';
+  const isDeactivated = !!profile?.deactivated_at;
+
   return (
-    <AuthContext.Provider value={{ session, profile, agency, isLoading, signOut, refreshProfile }}>
+    <AuthContext.Provider value={{ session, profile, agency, isOwner, isOwnerOrManager, isDeactivated, isLoading, signOut, refreshProfile }}>
       {children}
     </AuthContext.Provider>
   );
