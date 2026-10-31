@@ -188,7 +188,7 @@ export default function Renewals() {
               return (
                 <TableRow key={p.id}>
                   <TableCell>
-                    <div className="font-medium">{p.client?.name}</div>
+                    <div className="font-medium">{p.client?.name ?? '—'}</div>
                     <div className="text-xs text-muted-foreground">{p.client?.phone || p.client?.email || 'No contact info'}</div>
                   </TableCell>
                   <TableCell>
@@ -374,7 +374,7 @@ export default function Renewals() {
                   overdueRenewals.map(p => (
                     <TableRow key={p.id}>
                       <TableCell>
-                        <div className="font-medium">{p.client?.name}</div>
+                        <div className="font-medium">{p.client?.name ?? '—'}</div>
                         <div className="text-xs text-muted-foreground">{p.client?.phone || p.client?.email || 'No contact info'}</div>
                       </TableCell>
                       <TableCell>

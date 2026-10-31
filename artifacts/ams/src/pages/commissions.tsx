@@ -221,7 +221,7 @@ export default function Commissions() {
                         <FormControl><SelectTrigger><SelectValue placeholder="Select policy" /></SelectTrigger></FormControl>
                         <SelectContent>
                           {policies?.map(p => (
-                            <SelectItem key={p.id} value={p.id}>{p.policy_number} - {p.client?.name}</SelectItem>
+                            <SelectItem key={p.id} value={p.id}>{p.policy_number} - {p.client?.name ?? '—'}</SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
@@ -419,7 +419,7 @@ export default function Commissions() {
                     </TableCell>
                     <TableCell>
                       <div className="font-medium">{comm.policy?.policy_number}</div>
-                      <div className="text-xs text-muted-foreground">{comm.policy?.client?.name}</div>
+                      <div className="text-xs text-muted-foreground">{comm.policy?.client?.name ?? '—'}</div>
                     </TableCell>
                     <TableCell className="font-medium">
                       {comm.policy?.insurer?.name}

@@ -78,6 +78,10 @@ export interface Client {
   created_at: string;
 }
 
+export interface ClientWithAgent extends Client {
+  assigned_agent: { id: string; full_name: string } | null;
+}
+
 export type PolicyStatus = 'active' | 'expired' | 'cancelled' | 'pending';
 
 export interface Policy {
@@ -102,7 +106,8 @@ export interface Policy {
 
 // Joined policy (with nested objects)
 export interface PolicyWithRelations extends Policy {
-  client: Pick<Client, 'id' | 'name' | 'type' | 'phone' | 'email'>;
+  // null when RLS hides the client (e.g. it was reassigned away from this agent)
+  client: Pick<Client, 'id' | 'name' | 'type' | 'phone' | 'email'> | null;
   insurer: Pick<Insurer, 'id' | 'name'>;
   product_line: Pick<ProductLine, 'id' | 'name'>;
   agent: Pick<AgencyUser, 'id' | 'full_name'>;

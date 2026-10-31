@@ -207,7 +207,7 @@ export default function Dashboard() {
                   <TableBody>
                     {metrics?.recentPolicies.map((policy: any) => (
                       <TableRow key={policy.id}>
-                        <TableCell className="font-medium">{policy.client?.name}</TableCell>
+                        <TableCell className="font-medium">{policy.client?.name ?? '—'}</TableCell>
                         <TableCell>
                           <div className="text-sm">{policy.product_line?.name}</div>
                           <div className="text-xs text-muted-foreground">{policy.insurer?.name}</div>
@@ -249,7 +249,7 @@ export default function Dashboard() {
                       const isUrgent = daysLeft <= 7;
                       return (
                         <TableRow key={policy.id}>
-                          <TableCell className="font-medium">{policy.client?.name}</TableCell>
+                          <TableCell className="font-medium">{policy.client?.name ?? '—'}</TableCell>
                           <TableCell>
                             <div className="text-sm">{policy.policy_number}</div>
                             <div className="text-xs text-muted-foreground">{policy.insurer?.name}</div>

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { usePolicies, useInsurers, useProductLines, useClients, useAgencyUsers, useCreatePolicy, useUpdatePolicy, useDeletePolicy } from '@/hooks/queries';
+import { usePolicies, useInsurers, useProductLines, useClients, useCreatePolicy, useUpdatePolicy, useDeletePolicy } from '@/hooks/queries';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -13,6 +13,7 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
+import { useAgencyMembers } from '@/hooks/team';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
 import { Policy } from '@/lib/types';
@@ -40,7 +41,7 @@ export default function Policies() {
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   
-  const { profile, isOwnerOrManager } = useAuth();
+  const { session, profile, isOwnerOrManager } = useAuth();
   const { toast } = useToast();
   
   const { data: policies, isLoading } = usePolicies({ 
@@ -51,7 +52,7 @@ export default function Policies() {
   const { data: clients } = useClients();
   const { data: insurers } = useInsurers();
   const { data: productLines } = useProductLines();
-  const { data: users } = useAgencyUsers();
+  const { data: users } = useAgencyMembers();
   
   const createPolicy = useCreatePolicy();
   const deletePolicy = useDeletePolicy();
@@ -62,7 +63,7 @@ export default function Policies() {
       client_id: '',
       insurer_id: '',
       product_line_id: '',
-      agent_id: profile?.id || '',
+      agent_id: session?.id || profile?.id || '',
       policy_number: '',
       premium_amount: 0,
       commission_rate: 10,
@@ -75,11 +76,12 @@ export default function Policies() {
 
   const filteredPolicies = policies?.filter(p => 
     p.policy_number.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    p.client?.name.toLowerCase().includes(searchTerm.toLowerCase())
+    p.client?.name?.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   const onSubmit = (values: z.infer<typeof policySchema>) => {
-    createPolicy.mutate(values, {
+    // Agents never choose an agent: policies are always recorded against themselves
+    createPolicy.mutate(isOwnerOrManager ? values : { ...values, agent_id: session?.id ?? values.agent_id }, {
       onSuccess: () => {
         toast({ title: 'Policy created' });
         setIsAddOpen(false);
@@ -359,7 +361,7 @@ export default function Policies() {
                   <TableRow key={policy.id}>
                     <TableCell>
                       <div className="font-medium text-primary">{policy.policy_number}</div>
-                      <div className="text-sm font-medium">{policy.client?.name}</div>
+                      <div className="text-sm font-medium">{policy.client?.name ?? '—'}</div>
                     </TableCell>
                     <TableCell>
                       <div className="text-sm font-medium">{policy.product_line?.name}</div>

@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import type { 
   Client, 
+  ClientWithAgent,
   Policy, 
   PolicyWithRelations, 
   Insurer, 
@@ -23,11 +24,11 @@ export function useClients() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('clients')
-        .select('*')
+        .select('*, assigned_agent:users!clients_assigned_agent_id_fkey(id, full_name)')
         .eq('agency_id', agency?.id)
         .order('name');
       if (error) throw error;
-      return data as Client[];
+      return data as unknown as ClientWithAgent[];
     },
     enabled: !!session && !!agency?.id,
   });
@@ -40,11 +41,11 @@ export function useClient(id: string) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('clients')
-        .select('*')
+        .select('*, assigned_agent:users!clients_assigned_agent_id_fkey(id, full_name)')
         .eq('id', id)
         .single();
       if (error) throw error;
-      return data as Client;
+      return data as unknown as ClientWithAgent;
     },
     enabled: !!session && !!id,
   });
@@ -55,11 +56,16 @@ export function useCreateClient() {
   const { agency } = useAuth();
   
   return useMutation({
-    mutationFn: async (client: Omit<Client, 'id' | 'agency_id' | 'created_at' | 'assigned_agent_id'>) => {
+    mutationFn: async (client: Omit<Client, 'id' | 'agency_id' | 'created_at' | 'assigned_agent_id'> & { assigned_agent_id?: string }) => {
       if (!agency?.id) throw new Error('No agency');
       const { data, error } = await supabase
         .from('clients')
-        .insert({ ...client, agency_id: agency.id })
+        .insert({
+          ...client,
+          // only send the assignee when one was chosen; otherwise the DB defaults it to the inserting user
+          ...(client.assigned_agent_id ? { assigned_agent_id: client.assigned_agent_id } : {}),
+          agency_id: agency.id,
+        })
         .select()
         .single();
       if (error) throw error;
