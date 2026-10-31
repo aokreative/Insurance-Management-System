@@ -32,7 +32,8 @@ const reminderSchema = z.object({
 type ReminderFormValues = z.infer<typeof reminderSchema>;
 
 export default function Renewals() {
-  const { agency, session } = useAuth();
+  const { agency, session, profile, isOwnerOrManager } = useAuth();
+  const isAgent = !!profile && !isOwnerOrManager;
   const { toast } = useToast();
   const createReminder = useCreateRenewalReminder();
   
@@ -260,7 +261,7 @@ export default function Renewals() {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Upcoming Renewals</h1>
+          <h1 className="text-3xl font-bold tracking-tight">{isAgent ? 'My Upcoming Renewals' : 'Upcoming Renewals'}</h1>
           <p className="text-muted-foreground">Don't miss a renewal. Track expiring policies for the next 90 days.</p>
         </div>
         <Button variant="secondary" onClick={handleExportCsv}>
