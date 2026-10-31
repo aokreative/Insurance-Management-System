@@ -104,18 +104,13 @@ export default function Reports() {
     if (!session) return;
     setIsGenerating(true);
     try {
-      const response = await fetch(`${import.meta.env.BASE_URL}api/reports/generate`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${(await supabase.auth.getSession()).data.session?.access_token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ month: parseInt(generateMonth), year: parseInt(generateYear) }),
+      const { error } = await supabase.rpc('generate_monthly_report', {
+        p_month: parseInt(generateMonth),
+        p_year: parseInt(generateYear),
       });
-      
-      if (!response.ok) {
-        const err = await response.json().catch(() => ({}));
-        throw new Error(err.error || 'Failed to generate report');
+
+      if (error) {
+        throw new Error(error.message || 'Failed to generate report');
       }
 
       toast({

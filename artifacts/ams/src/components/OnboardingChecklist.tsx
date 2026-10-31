@@ -59,6 +59,7 @@ export function OnboardingChecklist({ agencyId, hasInsurers, hasClients, hasPoli
       const t = setTimeout(() => dismiss(), 3000);
       return () => clearTimeout(t);
     }
+    return undefined;
   }, [allDone, dismissed]);
 
   const dismiss = () => {
