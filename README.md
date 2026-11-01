@@ -70,7 +70,7 @@ Demo logins exist for the demo agency: `demo@ams.co.ke` (Owner), `manager@ams.co
 ## Database
 
 Supabase project: **ERP Demo** (`frzjhknbocuaduuduxkk`). Migrations 001–008 are applied
-(`006a`, `007a` and `008a` were follow-up fixes applied live and folded into the same migration files).
+(`006a` is its own file and must be run after 006; `007a` and `008a` were live follow-ups folded into `007` and `008`).
 New migrations go in `supabase/migrations/` and should be applied in order.
 
 | Migration | Adds |
@@ -81,6 +81,7 @@ New migrations go in `supabase/migrations/` and should be applied in order.
 | 004 | `generate_monthly_report` |
 | 005 | Lock down `SECURITY DEFINER` functions |
 | 006 | Team access control: roles, client assignment, role-scoped RLS, deactivation |
+| 006a | Guard: only owners/managers can change `policies.commission_received` |
 | 007 | Agency invites and invite RPCs |
 | 008 | Team management RPCs (reassign, change role, remove) |
 
