@@ -384,7 +384,7 @@ export default function ClientDetail() {
                       <TableHead>Details</TableHead>
                       <TableHead className="text-right">Premium</TableHead>
                       <TableHead>Status</TableHead>
-                      <TableHead className="w-[50px]"></TableHead>
+                      {isOwnerOrManager && <TableHead className="w-[50px]"></TableHead>}
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -404,11 +404,13 @@ export default function ClientDetail() {
                             {policy.status}
                           </Badge>
                         </TableCell>
-                        <TableCell>
-                          <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive hover:bg-destructive/10" onClick={() => setDeletePolicyId(policy.id)}>
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </TableCell>
+                        {isOwnerOrManager && (
+                          <TableCell>
+                            <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive hover:bg-destructive/10" onClick={() => setDeletePolicyId(policy.id)}>
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </TableCell>
+                        )}
                       </TableRow>
                     ))}
                   </TableBody>

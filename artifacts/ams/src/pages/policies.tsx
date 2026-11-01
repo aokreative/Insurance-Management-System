@@ -398,10 +398,14 @@ export default function Policies() {
                           <DropdownMenuItem onClick={() => {}} disabled>
                             <Edit className="mr-2 h-4 w-4" /> Edit Policy
                           </DropdownMenuItem>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem className="text-destructive focus:bg-destructive/10" onClick={() => setDeleteId(policy.id)}>
-                            <Trash2 className="mr-2 h-4 w-4" /> Delete Policy
-                          </DropdownMenuItem>
+                          {isOwnerOrManager && (
+                            <>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem className="text-destructive focus:bg-destructive/10" onClick={() => setDeleteId(policy.id)}>
+                                <Trash2 className="mr-2 h-4 w-4" /> Delete Policy
+                              </DropdownMenuItem>
+                            </>
+                          )}
                         </DropdownMenuContent>
                       </DropdownMenu>
                     </TableCell>

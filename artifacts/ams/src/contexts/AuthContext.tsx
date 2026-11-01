@@ -1,5 +1,6 @@
-import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
+import { queryClient } from '@/lib/queryClient';
 import type { Agency, AgencyUser } from '@/lib/types';
 import { useLocation } from 'wouter';
 
@@ -43,6 +44,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [agency, setAgency] = useState<Agency | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [, setLocation] = useLocation();
+  // Id of the user the cached data belongs to; used to detect a user switch.
+  const lastUserIdRef = useRef<string | null>(null);
 
   /** Explicitly reload profile + agency. Call after signup/setup completes. */
   const refreshProfile = useCallback(async () => {
@@ -62,6 +65,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       if (authSession?.user) {
         if (mounted) {
+          lastUserIdRef.current = authSession.user.id;
           setSession({ id: authSession.user.id, email: authSession.user.email ?? '' });
         }
         const { profile: p, agency: a } = await fetchProfileAndAgency(authSession.user.id);
@@ -89,6 +93,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, currentSession) => {
       if (!mounted) return;
 
+      // Cached query data is keyed by agency, not user. Drop it whenever the
+      // signed-in user changes (including sign-out) so the next login never
+      // sees the previous user's data.
+      const newUserId = currentSession?.user?.id ?? null;
+      const userChanged = newUserId !== lastUserIdRef.current;
+      if (userChanged) {
+        queryClient.clear();
+        lastUserIdRef.current = newUserId;
+      }
+
       if (currentSession?.user) {
         setSession({ id: currentSession.user.id, email: currentSession.user.email ?? '' });
 
@@ -97,8 +111,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
           const { profile: p, agency: a } = await fetchProfileAndAgency(currentSession.user.id);
           if (mounted) {
-            if (p) setProfile(p);
-            if (a) setAgency(a);
+            // A different user just signed in: take the fetch result as-is, even
+            // null, so the previous user's profile/agency can never linger. For
+            // the same user (e.g. TOKEN_REFRESHED) keep the existing values if
+            // the refetch comes back empty (transient failure).
+            if (userChanged) {
+              setProfile(p);
+              setAgency(a);
+            } else {
+              if (p) setProfile(p);
+              if (a) setAgency(a);
+            }
           }
         }
       } else {
@@ -121,6 +144,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signOut = async () => {
     await supabase.auth.signOut();
+    queryClient.clear();
+    lastUserIdRef.current = null;
     setProfile(null);
     setAgency(null);
     setSession(null);

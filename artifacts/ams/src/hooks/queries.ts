@@ -104,12 +104,15 @@ export function useDeleteClient() {
 
   return useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase
+      const { data: deleted, error } = await supabase
         .from('clients')
         .delete()
         .eq('id', id)
-        .eq('agency_id', agency?.id);
+        .eq('agency_id', agency?.id)
+        .select('id');
       if (error) throw error;
+      // RLS silently deletes 0 rows for roles without delete permission.
+      if (!deleted || deleted.length === 0) throw new Error('Nothing was deleted — you may not have permission');
       return id;
     },
     onSuccess: () => {
@@ -186,12 +189,15 @@ export function useDeleteInsurer() {
 
   return useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase
+      const { data: deleted, error } = await supabase
         .from('insurers')
         .delete()
         .eq('id', id)
-        .eq('agency_id', agency?.id);
+        .eq('agency_id', agency?.id)
+        .select('id');
       if (error) throw error;
+      // RLS silently deletes 0 rows for roles without delete permission.
+      if (!deleted || deleted.length === 0) throw new Error('Nothing was deleted — you may not have permission');
       return id;
     },
     onSuccess: () => {
@@ -268,12 +274,15 @@ export function useDeleteProductLine() {
 
   return useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase
+      const { data: deleted, error } = await supabase
         .from('product_lines')
         .delete()
         .eq('id', id)
-        .eq('agency_id', agency?.id);
+        .eq('agency_id', agency?.id)
+        .select('id');
       if (error) throw error;
+      // RLS silently deletes 0 rows for roles without delete permission.
+      if (!deleted || deleted.length === 0) throw new Error('Nothing was deleted — you may not have permission');
       return id;
     },
     onSuccess: () => {
@@ -389,12 +398,15 @@ export function useDeletePolicy() {
   return useMutation({
     mutationFn: async (id: string) => {
       if (!agency?.id) throw new Error('No agency');
-      const { error } = await supabase
+      const { data: deleted, error } = await supabase
         .from('policies')
         .delete()
         .eq('id', id)
-        .eq('agency_id', agency.id);
+        .eq('agency_id', agency.id)
+        .select('id');
       if (error) throw error;
+      // RLS silently deletes 0 rows for roles without delete permission.
+      if (!deleted || deleted.length === 0) throw new Error('Nothing was deleted — you may not have permission');
       return id;
     },
     onSuccess: () => {
@@ -478,12 +490,15 @@ export function useDeleteCommission() {
 
   return useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase
+      const { data: deleted, error } = await supabase
         .from('commission_transactions')
         .delete()
         .eq('id', id)
-        .eq('agency_id', agency?.id);
+        .eq('agency_id', agency?.id)
+        .select('id');
       if (error) throw error;
+      // RLS silently deletes 0 rows for roles without delete permission.
+      if (!deleted || deleted.length === 0) throw new Error('Nothing was deleted — you may not have permission');
       return id;
     },
     onSuccess: () => {

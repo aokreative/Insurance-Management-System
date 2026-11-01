@@ -382,9 +382,11 @@ export default function Clients() {
                     <Button variant="ghost" size="icon" onClick={(e) => openEdit(client, e)}>
                       <Edit className="h-4 w-4" />
                     </Button>
-                    <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive hover:bg-destructive/10" onClick={(e) => { e.stopPropagation(); setDeleteId(client.id); }}>
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
+                    {isOwnerOrManager && (
+                      <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive hover:bg-destructive/10" onClick={(e) => { e.stopPropagation(); setDeleteId(client.id); }}>
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    )}
                   </TableCell>
                 </TableRow>
               ))

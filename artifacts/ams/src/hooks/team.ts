@@ -43,12 +43,7 @@ export function useReassignClient() {
       if (error) throw error;
       return data as { policies_moved: number };
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['clients'] });
-      queryClient.invalidateQueries({ queryKey: ['client'] });
-      queryClient.invalidateQueries({ queryKey: ['policies'] });
-      queryClient.invalidateQueries({ queryKey: ['commissions'] });
-    },
+    onSuccess: () => invalidateOwnershipData(queryClient),
   });
 }
 
@@ -135,10 +130,31 @@ export function useRevokeInvite() {
   });
 }
 
-function invalidateTeamData(queryClient: ReturnType<typeof useQueryClient>) {
-  for (const key of ['users', 'members', 'invites', 'clients', 'client', 'policies', 'commissions']) {
+/**
+ * Ownership changes (reassign / role change / removal) move clients, policies and
+ * commissions between agents, so every aggregate derived from them is stale too.
+ */
+const OWNERSHIP_KEYS = [
+  'clients', 'client', 'policies', 'commissions',
+  'dashboard-metrics', 'renewals', 'renewals-count', 'overdue-renewals',
+  'renewal-reminders', 'renewal-reminder-counts', 'reports',
+];
+
+function invalidateOwnershipData(queryClient: ReturnType<typeof useQueryClient>) {
+  for (const key of OWNERSHIP_KEYS) {
     queryClient.invalidateQueries({ queryKey: [key] });
   }
+  // Dashboard charts: ['chart-monthly-premium', ...], ['chart-policy-status', ...], etc.
+  queryClient.invalidateQueries({
+    predicate: (q) => typeof q.queryKey[0] === 'string' && q.queryKey[0].startsWith('chart-'),
+  });
+}
+
+function invalidateTeamData(queryClient: ReturnType<typeof useQueryClient>) {
+  for (const key of ['users', 'members', 'invites']) {
+    queryClient.invalidateQueries({ queryKey: [key] });
+  }
+  invalidateOwnershipData(queryClient);
 }
 
 export function useChangeMemberRole() {
