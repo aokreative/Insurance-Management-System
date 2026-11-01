@@ -21,6 +21,8 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/contexts/AuthContext';
+import { useAgencyMembers } from '@/hooks/team';
 import { ClientType } from '@/lib/types';
 import { exportToCsv } from '@/lib/csv-export';
 
@@ -48,6 +50,10 @@ export default function Clients() {
   const updateClient = useUpdateClient();
   const deleteClient = useDeleteClient();
   const { toast } = useToast();
+  const { session, isOwnerOrManager } = useAuth();
+  const { data: members } = useAgencyMembers();
+  const [assigneeFilter, setAssigneeFilter] = useState('all');
+  const [assigneeId, setAssigneeId] = useState<string>(session?.id ?? '');
 
   const form = useForm<ClientFormValues>({
     resolver: zodResolver(clientSchema),
@@ -62,11 +68,12 @@ export default function Clients() {
     },
   });
 
-  const filteredClients = clients?.filter(c => 
-    c.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
+  const filteredClients = clients?.filter(c =>
+    (assigneeFilter === 'all' || c.assigned_agent_id === assigneeFilter) &&
+    (c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     c.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
     c.phone?.includes(searchTerm) ||
-    c.kra_pin?.toLowerCase().includes(searchTerm.toLowerCase())
+    c.kra_pin?.toLowerCase().includes(searchTerm.toLowerCase()))
   );
 
   const onSubmit = (values: ClientFormValues) => {
@@ -83,7 +90,7 @@ export default function Clients() {
         }
       });
     } else {
-      createClient.mutate(values, {
+      createClient.mutate(isOwnerOrManager && assigneeId ? { ...values, assigned_agent_id: assigneeId } : values, {
         onSuccess: () => {
           toast({ title: 'Client created successfully' });
           setIsAddSheetOpen(false);
@@ -151,6 +158,7 @@ export default function Clients() {
           setIsAddSheetOpen(open);
           if (!open) {
             setEditingClient(null);
+            setAssigneeId(session?.id ?? '');
             form.reset({ name: '', type: 'individual', phone: '', email: '', kra_pin: '', id_or_reg_number: '', address: '' });
           }
         }}>
@@ -277,6 +285,18 @@ export default function Clients() {
                   )}
                 />
 
+                {isOwnerOrManager && !editingClient && (
+                  <div className="space-y-2">
+                    <div className="text-sm font-medium">Assigned to</div>
+                    <Select value={assigneeId} onValueChange={setAssigneeId}>
+                      <SelectTrigger data-testid="select-client-assignee"><SelectValue placeholder="Select member" /></SelectTrigger>
+                      <SelectContent>
+                        {members?.map(m => <SelectItem key={m.id} value={m.id}>{m.full_name}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+
                 <div className="pt-4">
                   <Button type="submit" className="w-full" disabled={createClient.isPending || updateClient.isPending}>
                     {createClient.isPending || updateClient.isPending ? "Saving..." : "Save Client"}
@@ -298,6 +318,15 @@ export default function Clients() {
             onChange={(e) => setSearchTerm(e.target.value)}
           />
         </div>
+        {isOwnerOrManager && (
+          <Select value={assigneeFilter} onValueChange={setAssigneeFilter}>
+            <SelectTrigger className="w-[180px] bg-card" data-testid="filter-assigned-to"><SelectValue placeholder="Assigned to" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All members</SelectItem>
+              {members?.map(m => <SelectItem key={m.id} value={m.id}>{m.full_name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        )}
         <Button variant="secondary" size="sm" onClick={handleExportCsv} className="ml-auto">
           <Download className="w-4 h-4 mr-2" /> Export CSV
         </Button>
@@ -311,17 +340,18 @@ export default function Clients() {
               <TableHead>Type</TableHead>
               <TableHead>Contact</TableHead>
               <TableHead>Identifiers</TableHead>
+              <TableHead>Assigned to</TableHead>
               <TableHead className="text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {isLoading ? (
               <TableRow>
-                <TableCell colSpan={5} className="text-center py-8">Loading clients...</TableCell>
+                <TableCell colSpan={6} className="text-center py-8">Loading clients...</TableCell>
               </TableRow>
             ) : filteredClients?.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
+                <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
                   No clients found. {searchTerm && "Try a different search."}
                 </TableCell>
               </TableRow>
@@ -347,13 +377,16 @@ export default function Clients() {
                     {client.kra_pin && <div className="text-sm">KRA: {client.kra_pin}</div>}
                     {client.id_or_reg_number && <div className="text-xs text-muted-foreground">ID/Reg: {client.id_or_reg_number}</div>}
                   </TableCell>
+                  <TableCell className="text-sm">{client.assigned_agent?.full_name ?? '—'}</TableCell>
                   <TableCell className="text-right">
                     <Button variant="ghost" size="icon" onClick={(e) => openEdit(client, e)}>
                       <Edit className="h-4 w-4" />
                     </Button>
-                    <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive hover:bg-destructive/10" onClick={(e) => { e.stopPropagation(); setDeleteId(client.id); }}>
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
+                    {isOwnerOrManager && (
+                      <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive hover:bg-destructive/10" onClick={(e) => { e.stopPropagation(); setDeleteId(client.id); }}>
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    )}
                   </TableCell>
                 </TableRow>
               ))

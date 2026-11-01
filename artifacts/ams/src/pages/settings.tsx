@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useUpdateAgency, useAgencyUsers } from '@/hooks/queries';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -9,14 +9,28 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
 import { ShieldCheck, Users, Building } from 'lucide-react';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { formatDate } from '@/lib/utils';
+import { InviteMemberDialog } from '@/components/team/InviteMemberDialog';
+import { RemoveMemberDialog } from '@/components/team/RemoveMemberDialog';
+import { usePendingInvites, useRevokeInvite, useChangeMemberRole, useClientCountsByAgent } from '@/hooks/team';
 import { useForm } from 'react-hook-form';
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
 
 export default function Settings() {
-  const { agency, profile } = useAuth();
+  const { agency, profile, session, isOwner, isOwnerOrManager } = useAuth();
   const updateAgency = useUpdateAgency();
   const { data: users, isLoading: usersLoading } = useAgencyUsers();
   const { toast } = useToast();
+  const { data: invites } = usePendingInvites();
+  const { data: clientCounts } = useClientCountsByAgent();
+  const revokeInvite = useRevokeInvite();
+  const changeRole = useChangeMemberRole();
+  const [inviteOpen, setInviteOpen] = useState(false);
+  const [removing, setRemoving] = useState<{ id: string; full_name: string } | null>(null);
+  const activeUsers = users?.filter(u => !u.deactivated_at) ?? [];
+  const removedUsers = users?.filter(u => u.deactivated_at) ?? [];
 
   const form = useForm({
     defaultValues: {
@@ -36,8 +50,6 @@ export default function Settings() {
     });
   };
 
-  const isOwnerOrAdmin = profile?.role === 'owner' || profile?.role === 'admin';
-
   return (
     <div className="space-y-8 max-w-5xl">
       <div>
@@ -45,8 +57,14 @@ export default function Settings() {
         <p className="text-muted-foreground">Manage your workspace configuration and team.</p>
       </div>
 
-      <div className="grid gap-8 grid-cols-1 md:grid-cols-3">
-        <div className="md:col-span-1 space-y-4">
+      <Tabs defaultValue="profile" className="space-y-6">
+        <TabsList>
+          <TabsTrigger value="profile">Profile</TabsTrigger>
+          <TabsTrigger value="agency">Agency</TabsTrigger>
+          {isOwnerOrManager && <TabsTrigger value="team">Team</TabsTrigger>}
+        </TabsList>
+
+        <TabsContent value="profile" className="space-y-4 max-w-md">
           <Card className="bg-primary/5 border-primary/20">
             <CardHeader className="pb-2">
               <CardTitle className="text-base flex items-center gap-2">
@@ -73,13 +91,13 @@ export default function Settings() {
               <Badge variant="secondary" className="mt-2 capitalize">{profile?.role}</Badge>
             </CardContent>
           </Card>
-        </div>
+        </TabsContent>
 
-        <div className="md:col-span-2 space-y-8">
+        <TabsContent value="agency">
           <Card>
             <CardHeader>
               <CardTitle>Agency Profile</CardTitle>
-              <CardDescription>Update your agency's contact information and branding.</CardDescription>
+              <CardDescription>{isOwner ? "Update your agency's contact information and branding." : 'Only the owner can edit agency details.'}</CardDescription>
             </CardHeader>
             <CardContent>
               <Form {...form}>
@@ -90,7 +108,7 @@ export default function Settings() {
                     render={({ field }) => (
                       <FormItem>
                         <FormLabel>Agency Name</FormLabel>
-                        <FormControl><Input {...field} disabled={!isOwnerOrAdmin} /></FormControl>
+                        <FormControl><Input {...field} disabled={!isOwner} /></FormControl>
                         <FormMessage />
                       </FormItem>
                     )}
@@ -102,7 +120,7 @@ export default function Settings() {
                       render={({ field }) => (
                         <FormItem>
                           <FormLabel>General Email</FormLabel>
-                          <FormControl><Input type="email" {...field} disabled={!isOwnerOrAdmin} /></FormControl>
+                          <FormControl><Input type="email" {...field} disabled={!isOwner} /></FormControl>
                           <FormMessage />
                         </FormItem>
                       )}
@@ -113,7 +131,7 @@ export default function Settings() {
                       render={({ field }) => (
                         <FormItem>
                           <FormLabel>Phone Number</FormLabel>
-                          <FormControl><Input {...field} disabled={!isOwnerOrAdmin} /></FormControl>
+                          <FormControl><Input {...field} disabled={!isOwner} /></FormControl>
                           <FormMessage />
                         </FormItem>
                       )}
@@ -125,12 +143,12 @@ export default function Settings() {
                     render={({ field }) => (
                       <FormItem>
                         <FormLabel>Physical Address</FormLabel>
-                        <FormControl><Input {...field} disabled={!isOwnerOrAdmin} /></FormControl>
+                        <FormControl><Input {...field} disabled={!isOwner} /></FormControl>
                         <FormMessage />
                       </FormItem>
                     )}
                   />
-                  {isOwnerOrAdmin && (
+                  {isOwner && (
                     <Button type="submit" disabled={updateAgency.isPending}>
                       {updateAgency.isPending ? "Saving..." : "Save Changes"}
                     </Button>
@@ -139,8 +157,10 @@ export default function Settings() {
               </Form>
             </CardContent>
           </Card>
+        </TabsContent>
 
-          {isOwnerOrAdmin && (
+        {isOwnerOrManager && (
+          <TabsContent value="team" className="space-y-8">
             <Card>
               <CardHeader className="flex flex-row items-center justify-between">
                 <div>
@@ -149,7 +169,7 @@ export default function Settings() {
                   </CardTitle>
                   <CardDescription>Manage who has access to your workspace.</CardDescription>
                 </div>
-                <Button variant="outline" size="sm" onClick={() => toast({ title: 'Invites coming soon', description: 'Phase 6 feature' })}>
+                <Button variant="outline" size="sm" onClick={() => setInviteOpen(true)}>
                   Invite Member
                 </Button>
               </CardHeader>
@@ -161,13 +181,15 @@ export default function Settings() {
                         <TableHead>Name</TableHead>
                         <TableHead>Email</TableHead>
                         <TableHead>Role</TableHead>
+                        <TableHead className="text-right">Clients</TableHead>
+                        {isOwner && <TableHead className="text-right">Actions</TableHead>}
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {usersLoading ? (
-                        <TableRow><TableCell colSpan={3} className="text-center py-4">Loading...</TableCell></TableRow>
+                        <TableRow><TableCell colSpan={isOwner ? 5 : 4} className="text-center py-4">Loading...</TableCell></TableRow>
                       ) : (
-                        users?.map(user => (
+                        activeUsers.map(user => (
                           <TableRow key={user.id}>
                             <TableCell className="font-medium">{user.full_name}</TableCell>
                             <TableCell>{user.email}</TableCell>
@@ -176,17 +198,110 @@ export default function Settings() {
                                 {user.role}
                               </Badge>
                             </TableCell>
+                            <TableCell className="text-right">{clientCounts?.[user.id] ?? 0}</TableCell>
+                            {isOwner && (
+                              <TableCell className="text-right">
+                                {user.role !== 'owner' && (
+                                  <div className="flex items-center justify-end gap-2">
+                                    <Select
+                                      value={user.role}
+                                      onValueChange={(role) => changeRole.mutate(
+                                        { userId: user.id, role: role as 'manager' | 'agent' },
+                                        {
+                                          onSuccess: () => toast({ title: 'Role updated' }),
+                                          onError: (err: any) => toast({ title: 'Could not change role', description: err.message, variant: 'destructive' }),
+                                        },
+                                      )}
+                                    >
+                                      <SelectTrigger className="w-28 h-8"><SelectValue /></SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value="manager">Manager</SelectItem>
+                                        <SelectItem value="agent">Agent</SelectItem>
+                                      </SelectContent>
+                                    </Select>
+                                    <Button variant="outline" size="sm" onClick={() => setRemoving({ id: user.id, full_name: user.full_name })}>
+                                      Remove
+                                    </Button>
+                                  </div>
+                                )}
+                              </TableCell>
+                            )}
                           </TableRow>
                         ))
                       )}
                     </TableBody>
                   </Table>
                 </div>
+                {removedUsers.length > 0 && (
+                  <div className="mt-6">
+                    <div className="text-sm font-medium text-muted-foreground mb-2">Removed</div>
+                    <ul className="text-sm text-muted-foreground space-y-1">
+                      {removedUsers.map(u => (
+                        <li key={u.id}>{u.full_name}{u.email ? ` (${u.email})` : ''}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
               </CardContent>
             </Card>
-          )}
-        </div>
-      </div>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Pending Invites</CardTitle>
+                <CardDescription>Invites that have not been accepted yet.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="border rounded-md">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Email</TableHead>
+                        <TableHead>Role</TableHead>
+                        <TableHead>Expires</TableHead>
+                        <TableHead className="text-right"></TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {!invites || invites.length === 0 ? (
+                        <TableRow><TableCell colSpan={4} className="text-center py-4 text-muted-foreground">No pending invites</TableCell></TableRow>
+                      ) : (
+                        invites.map(invite => {
+                          const canRevoke = isOwner || (invite.role === 'agent' && invite.invited_by === session?.id);
+                          return (
+                            <TableRow key={invite.id}>
+                              <TableCell className="font-medium">{invite.email}</TableCell>
+                              <TableCell><Badge variant="secondary" className="capitalize">{invite.role}</Badge></TableCell>
+                              <TableCell>{formatDate(invite.expires_at)}</TableCell>
+                              <TableCell className="text-right">
+                                {canRevoke && (
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    disabled={revokeInvite.isPending}
+                                    onClick={() => revokeInvite.mutate(invite.id, {
+                                      onSuccess: () => toast({ title: 'Invite revoked' }),
+                                      onError: (err: any) => toast({ title: 'Could not revoke invite', description: err.message, variant: 'destructive' }),
+                                    })}
+                                  >
+                                    Revoke
+                                  </Button>
+                                )}
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+              </CardContent>
+            </Card>
+
+            <InviteMemberDialog open={inviteOpen} onOpenChange={setInviteOpen} />
+            <RemoveMemberDialog member={removing} onOpenChange={(o) => { if (!o) setRemoving(null); }} />
+          </TabsContent>
+        )}
+      </Tabs>
     </div>
   );
 }

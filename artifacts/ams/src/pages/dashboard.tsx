@@ -11,7 +11,9 @@ import { startOfMonth, endOfMonth, addDays, startOfDay } from 'date-fns';
 import { OnboardingChecklist } from '@/components/OnboardingChecklist';
 
 export default function Dashboard() {
-  const { agency, session } = useAuth();
+  const { agency, session, profile, isOwnerOrManager } = useAuth();
+  const isAgent = !!profile && !isOwnerOrManager;
+  const my = (label: string, agentLabel: string) => (isAgent ? agentLabel : label);
   
   // Dashboard Metrics Queries
   const { data: metrics, isLoading } = useQuery({
@@ -125,7 +127,7 @@ export default function Dashboard() {
       <div className="flex flex-col gap-2">
         <h1 className="text-3xl font-bold tracking-tight">Overview</h1>
         <p className="text-muted-foreground">
-          Welcome back. Here's what's happening at your agency today.
+          {isAgent ? 'Your book of business' : "Welcome back. Here's what's happening at your agency today."}
         </p>
       </div>
 
@@ -141,19 +143,19 @@ export default function Dashboard() {
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
         <StatCard
-          title="Total Active Policies"
+          title={my("Total Active Policies", "My Active Policies")}
           value={metrics?.activeCount || 0}
           icon={FileText}
           loading={isLoading}
         />
         <StatCard
-          title="Active Premium Total"
+          title={my("Active Premium Total", "My Premium in Force")}
           value={formatCurrency(metrics?.totalPremium)}
           icon={DollarSign}
           loading={isLoading}
         />
         <StatCard
-          title="Expiring (30 Days)"
+          title={my("Expiring (30 Days)", "My Renewals (30 Days)")}
           value={metrics?.expiringCount || 0}
           subtitle="Requires attention"
           icon={CalendarClock}
@@ -161,19 +163,19 @@ export default function Dashboard() {
           className={metrics?.expiringCount ? "border-amber-200 dark:border-amber-900 bg-amber-50/50 dark:bg-amber-950/20" : ""}
         />
         <StatCard
-          title="Expected Commission (MTD)"
+          title={my("Expected Commission (MTD)", "My Expected Commission (MTD)")}
           value={formatCurrency(metrics?.expectedThisMonth)}
           icon={DollarSign}
           loading={isLoading}
         />
         <StatCard
-          title="Received Commission (MTD)"
+          title={my("Received Commission (MTD)", "My Commission Received (MTD)")}
           value={formatCurrency(metrics?.receivedThisMonth)}
           icon={DollarSign}
           loading={isLoading}
         />
         <StatCard
-          title="Overdue Commissions"
+          title={my("Overdue Commissions", "My Overdue Commissions")}
           value={metrics?.overdueCount || 0}
           subtitle="Pending past expected date"
           icon={AlertCircle}
@@ -185,7 +187,7 @@ export default function Dashboard() {
       <div className="grid gap-4 md:grid-cols-2">
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle>Recent Policies</CardTitle>
+            <CardTitle>{my('Recent Policies', 'My Recent Policies')}</CardTitle>
           </CardHeader>
           <CardContent>
             {isLoading ? (
@@ -207,7 +209,7 @@ export default function Dashboard() {
                   <TableBody>
                     {metrics?.recentPolicies.map((policy: any) => (
                       <TableRow key={policy.id}>
-                        <TableCell className="font-medium">{policy.client?.name}</TableCell>
+                        <TableCell className="font-medium">{policy.client?.name ?? '—'}</TableCell>
                         <TableCell>
                           <div className="text-sm">{policy.product_line?.name}</div>
                           <div className="text-xs text-muted-foreground">{policy.insurer?.name}</div>
@@ -224,7 +226,7 @@ export default function Dashboard() {
 
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle>Upcoming Renewals</CardTitle>
+            <CardTitle>{my('Upcoming Renewals', 'My Upcoming Renewals')}</CardTitle>
           </CardHeader>
           <CardContent>
             {isLoading ? (
@@ -249,7 +251,7 @@ export default function Dashboard() {
                       const isUrgent = daysLeft <= 7;
                       return (
                         <TableRow key={policy.id}>
-                          <TableCell className="font-medium">{policy.client?.name}</TableCell>
+                          <TableCell className="font-medium">{policy.client?.name ?? '—'}</TableCell>
                           <TableCell>
                             <div className="text-sm">{policy.policy_number}</div>
                             <div className="text-xs text-muted-foreground">{policy.insurer?.name}</div>

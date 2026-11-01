@@ -1,13 +1,17 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClientProvider } from '@tanstack/react-query';
+import { queryClient } from '@/lib/queryClient';
 import { Toaster } from '@/components/ui/toaster';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { Route, Switch, Router as WouterRouter, Redirect } from 'wouter';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { AppLayout } from '@/layouts/AppLayout';
 import NotFound from '@/pages/not-found';
 
 import Login from '@/pages/login';
 import Register from '@/pages/register';
+import Join from '@/pages/join';
 import Dashboard from '@/pages/dashboard';
 import Clients from '@/pages/clients';
 import ClientDetail from '@/pages/client-detail';
@@ -19,14 +23,27 @@ import Renewals from '@/pages/renewals';
 import Reports from '@/pages/reports';
 import Settings from '@/pages/settings';
 
-const queryClient = new QueryClient();
-
 // Protected Route Wrapper
 const ProtectedRoute = ({ component: Component }: { component: React.ComponentType }) => {
-  const { session, isLoading } = useAuth();
+  const { session, isLoading, isDeactivated, signOut } = useAuth();
   
   if (isLoading) return <div className="min-h-screen flex items-center justify-center">Loading workspace...</div>;
   if (!session) return <Redirect to="/login" />;
+  if (isDeactivated) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background p-4">
+        <Card className="w-full max-w-md text-center">
+          <CardHeader>
+            <CardTitle>Your access to this agency has been removed</CardTitle>
+            <CardDescription>Ask the agency owner if you think this is a mistake.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button onClick={() => { void signOut(); }}>Sign out</Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
   
   return (
     <AppLayout>
@@ -41,6 +58,7 @@ function Router() {
       <Route path="~^/$" component={() => <Redirect to="/dashboard" />} />
       <Route path="/login" component={Login} />
       <Route path="/register" component={Register} />
+      <Route path="/join" component={Join} />
       
       <Route path="/dashboard" component={() => <ProtectedRoute component={Dashboard} />} />
       <Route path="/clients" component={() => <ProtectedRoute component={Clients} />} />

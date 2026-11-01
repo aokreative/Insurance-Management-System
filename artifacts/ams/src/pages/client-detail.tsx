@@ -1,18 +1,20 @@
 import React, { useState, useEffect } from 'react';
 import { useRoute } from 'wouter';
-import { useClient, useUpdateClient, usePolicies, useInsurers, useProductLines, useCreatePolicy, useAgencyUsers, useDeletePolicy } from '@/hooks/queries';
+import { useClient, useUpdateClient, usePolicies, useInsurers, useProductLines, useCreatePolicy, useDeletePolicy } from '@/hooks/queries';
+import { useAgencyMembers, useReassignClient } from '@/hooks/team';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
-import { Edit, FileText, ArrowLeft, Building2, User, Plus, Trash2 } from 'lucide-react';
+import { Edit, FileText, ArrowLeft, Building2, User, Plus, Trash2, UserCog } from 'lucide-react';
 import { formatCurrency, formatDate, getStatusColor } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
 import { 
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
@@ -41,13 +43,14 @@ const policySchema = z.object({
 export default function ClientDetail() {
   const [, params] = useRoute('/clients/:id');
   const clientId = params?.id || '';
-  const { profile } = useAuth();
+  const { session, profile, isOwnerOrManager } = useAuth();
   
   const { data: client, isLoading: isClientLoading } = useClient(clientId);
   const { data: policies, isLoading: isPoliciesLoading } = usePolicies({ clientId });
   const { data: insurers } = useInsurers();
   const { data: productLines } = useProductLines();
-  const { data: users } = useAgencyUsers();
+  const { data: members } = useAgencyMembers();
+  const reassignClient = useReassignClient();
   
   const updateClient = useUpdateClient();
   const createPolicy = useCreatePolicy();
@@ -57,13 +60,15 @@ export default function ClientDetail() {
   const [isEditClientOpen, setIsEditClientOpen] = useState(false);
   const [isAddPolicyOpen, setIsAddPolicyOpen] = useState(false);
   const [deletePolicyId, setDeletePolicyId] = useState<string | null>(null);
+  const [isReassignOpen, setIsReassignOpen] = useState(false);
+  const [newAgentId, setNewAgentId] = useState('');
   
   const form = useForm({
     resolver: zodResolver(policySchema),
     defaultValues: {
       insurer_id: '',
       product_line_id: '',
-      agent_id: profile?.id || '',
+      agent_id: session?.id || profile?.id || '',
       policy_number: '',
       premium_amount: 0,
       commission_rate: 10,
@@ -87,6 +92,8 @@ export default function ClientDetail() {
   const onAddPolicy = (values: z.infer<typeof policySchema>) => {
     createPolicy.mutate({
       ...values,
+      // Agents never choose an agent: policies are always recorded against themselves
+      agent_id: isOwnerOrManager ? values.agent_id : (session?.id ?? values.agent_id),
       client_id: clientId,
     }, {
       onSuccess: () => {
@@ -96,6 +103,20 @@ export default function ClientDetail() {
       },
       onError: (err) => {
         toast({ title: 'Error adding policy', description: err.message, variant: 'destructive' });
+      }
+    });
+  };
+
+  const handleReassign = () => {
+    if (!newAgentId) return;
+    reassignClient.mutate({ clientId, newAgentId }, {
+      onSuccess: (result) => {
+        toast({ title: `Reassigned — ${result.policies_moved} policies moved` });
+        setIsReassignOpen(false);
+        setNewAgentId('');
+      },
+      onError: (err) => {
+        toast({ title: 'Could not reassign client', description: err.message, variant: 'destructive' });
       }
     });
   };
@@ -150,6 +171,17 @@ export default function ClientDetail() {
             <div>
               <div className="text-sm font-medium text-muted-foreground">Address</div>
               <div>{client.address || '-'}</div>
+            </div>
+            <div>
+              <div className="text-sm font-medium text-muted-foreground">Assigned to</div>
+              <div className="flex items-center justify-between gap-2">
+                <span data-testid="text-client-assignee">{client.assigned_agent?.full_name ?? '—'}</span>
+                {isOwnerOrManager && (
+                  <Button variant="outline" size="sm" onClick={() => setIsReassignOpen(true)} data-testid="button-reassign-client">
+                    <UserCog className="w-4 h-4 mr-2" /> Reassign
+                  </Button>
+                )}
+              </div>
             </div>
             <div className="pt-4 border-t">
               <div className="text-sm font-medium text-muted-foreground">Identifiers</div>
@@ -308,7 +340,7 @@ export default function ClientDetail() {
                       />
                     </div>
                     
-                    {(profile?.role === 'admin' || profile?.role === 'owner') && (
+                    {isOwnerOrManager && (
                       <FormField
                         control={form.control}
                         name="agent_id"
@@ -318,7 +350,7 @@ export default function ClientDetail() {
                             <Select onValueChange={field.onChange} value={field.value}>
                               <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
                               <SelectContent>
-                                {users?.map(u => <SelectItem key={u.id} value={u.id}>{u.full_name}</SelectItem>)}
+                                {members?.map(u => <SelectItem key={u.id} value={u.id}>{u.full_name}</SelectItem>)}
                               </SelectContent>
                             </Select>
                             <FormMessage />
@@ -352,7 +384,7 @@ export default function ClientDetail() {
                       <TableHead>Details</TableHead>
                       <TableHead className="text-right">Premium</TableHead>
                       <TableHead>Status</TableHead>
-                      <TableHead className="w-[50px]"></TableHead>
+                      {isOwnerOrManager && <TableHead className="w-[50px]"></TableHead>}
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -372,11 +404,13 @@ export default function ClientDetail() {
                             {policy.status}
                           </Badge>
                         </TableCell>
-                        <TableCell>
-                          <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive hover:bg-destructive/10" onClick={() => setDeletePolicyId(policy.id)}>
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </TableCell>
+                        {isOwnerOrManager && (
+                          <TableCell>
+                            <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive hover:bg-destructive/10" onClick={() => setDeletePolicyId(policy.id)}>
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </TableCell>
+                        )}
                       </TableRow>
                     ))}
                   </TableBody>
@@ -386,6 +420,31 @@ export default function ClientDetail() {
           </CardContent>
         </Card>
       </div>
+
+      <Dialog open={isReassignOpen} onOpenChange={(open) => { setIsReassignOpen(open); if (!open) setNewAgentId(''); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Reassign {client.name}</DialogTitle>
+            <DialogDescription>
+              Move this client and all of their policies to another active member.
+            </DialogDescription>
+          </DialogHeader>
+          <Select value={newAgentId} onValueChange={setNewAgentId}>
+            <SelectTrigger data-testid="select-reassign-agent"><SelectValue placeholder="Select member" /></SelectTrigger>
+            <SelectContent>
+              {members?.filter(m => m.id !== client.assigned_agent_id).map(m => (
+                <SelectItem key={m.id} value={m.id}>{m.full_name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsReassignOpen(false)}>Cancel</Button>
+            <Button onClick={handleReassign} disabled={!newAgentId || reassignClient.isPending}>
+              {reassignClient.isPending ? 'Reassigning...' : 'Reassign'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <AlertDialog open={!!deletePolicyId} onOpenChange={(open) => !open && setDeletePolicyId(null)}>
         <AlertDialogContent>

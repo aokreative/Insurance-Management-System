@@ -37,8 +37,8 @@ export default function Commissions() {
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   
-  const { profile } = useAuth();
-  const isAgent = profile?.role === 'agent';
+  const { profile, isOwnerOrManager } = useAuth();
+  const isAgent = !!profile && !isOwnerOrManager;
 
   const { data: commissions, isLoading } = useCommissions({ status: statusFilter });
   const { data: policies } = usePolicies();
@@ -59,9 +59,9 @@ export default function Commissions() {
   });
 
   const filteredCommissions = commissions?.filter(c => 
-    c.policy?.policy_number.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    c.policy?.client?.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    c.policy?.insurer?.name.toLowerCase().includes(searchTerm.toLowerCase())
+    c.policy?.policy_number?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    c.policy?.client?.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    c.policy?.insurer?.name?.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   const totalExpected = commissions?.reduce((sum, c) => sum + (c.amount || 0), 0) || 0;
@@ -71,11 +71,11 @@ export default function Commissions() {
   const totalOverdue = commissions?.filter(c => c.status === 'pending' && c.expected_date && c.expected_date < today)
     .reduce((sum, c) => sum + (c.amount || 0), 0) || 0;
 
-  const collectionRate = totalExpected > 0 ? (totalReceived / totalExpected) * 100 : null;
+  const collectionRate = totalExpected > 0 ? (totalReceived / totalExpected) * 100 : 0;
   let rateColor = 'text-muted-foreground';
   let rateBg = 'bg-card';
   let rateBorder = 'border-border';
-  if (collectionRate !== null) {
+  if (totalExpected > 0) {
     if (collectionRate >= 80) {
       rateColor = 'text-emerald-700 dark:text-emerald-500';
       rateBg = 'bg-emerald-50 dark:bg-emerald-950/20';
@@ -193,7 +193,7 @@ export default function Commissions() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Commissions</h1>
-          <p className="text-muted-foreground">Track expected and received commissions.</p>
+          <p className="text-muted-foreground">{isAgent ? 'Your expected and received commissions.' : 'Track expected and received commissions.'}</p>
         </div>
 
         {!isAgent && (
@@ -221,7 +221,7 @@ export default function Commissions() {
                         <FormControl><SelectTrigger><SelectValue placeholder="Select policy" /></SelectTrigger></FormControl>
                         <SelectContent>
                           {policies?.map(p => (
-                            <SelectItem key={p.id} value={p.id}>{p.policy_number} - {p.client?.name}</SelectItem>
+                            <SelectItem key={p.id} value={p.id}>{p.policy_number} - {p.client?.name ?? '—'}</SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
@@ -312,8 +312,8 @@ export default function Commissions() {
         </Card>
         <Card className={`${rateBg} ${rateBorder}`}>
           <CardContent className="p-6">
-            <div className={`text-sm font-medium mb-1 ${collectionRate !== null ? rateColor.replace('700', '800').replace('500', '400') : 'text-muted-foreground'}`}>Collection Rate</div>
-            <div className={`text-2xl font-bold ${rateColor}`}>{collectionRate !== null ? `${collectionRate.toFixed(1)}%` : '—'}</div>
+            <div className={`text-sm font-medium mb-1 ${totalExpected > 0 ? rateColor.replace('700', '800').replace('500', '400') : 'text-muted-foreground'}`}>Collection Rate</div>
+            <div className={`text-2xl font-bold ${rateColor}`}>{totalExpected > 0 ? `${collectionRate.toFixed(1)}%` : '0%'}</div>
           </CardContent>
         </Card>
       </div>
@@ -384,25 +384,27 @@ export default function Commissions() {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead className="w-12 text-center">
-                <Checkbox 
-                  checked={filteredCommissions && filteredCommissions.filter(c => c.status === 'pending').length > 0 && selectedIds.size === filteredCommissions.filter(c => c.status === 'pending').length}
-                  onCheckedChange={toggleSelectAll}
-                />
-              </TableHead>
+              {!isAgent && (
+                <TableHead className="w-12 text-center">
+                  <Checkbox 
+                    checked={filteredCommissions && filteredCommissions.filter(c => c.status === 'pending').length > 0 && selectedIds.size === filteredCommissions.filter(c => c.status === 'pending').length}
+                    onCheckedChange={toggleSelectAll}
+                  />
+                </TableHead>
+              )}
               <TableHead>Policy & Client</TableHead>
               <TableHead>Insurer</TableHead>
               <TableHead className="text-right">Amount (KES)</TableHead>
               <TableHead>Dates</TableHead>
               <TableHead>Status</TableHead>
-              <TableHead className="text-right">Action</TableHead>
+              {!isAgent && <TableHead className="text-right">Action</TableHead>}
             </TableRow>
           </TableHeader>
           <TableBody>
             {isLoading ? (
-              <TableRow><TableCell colSpan={7} className="text-center py-8">Loading...</TableCell></TableRow>
+              <TableRow><TableCell colSpan={isAgent ? 5 : 7} className="text-center py-8">Loading...</TableCell></TableRow>
             ) : filteredCommissions?.length === 0 ? (
-              <TableRow><TableCell colSpan={7} className="text-center py-8 text-muted-foreground">No commission records found.</TableCell></TableRow>
+              <TableRow><TableCell colSpan={isAgent ? 5 : 7} className="text-center py-8 text-muted-foreground">No commission records found.</TableCell></TableRow>
             ) : (
               filteredCommissions?.map((comm) => {
                 const isOverdue = comm.status === 'pending' && comm.expected_date && comm.expected_date < today;
@@ -410,16 +412,18 @@ export default function Commissions() {
                 
                 return (
                   <TableRow key={comm.id}>
-                    <TableCell className="text-center">
-                      <Checkbox 
-                        checked={comm.status === 'received' ? true : selectedIds.has(comm.id)}
-                        disabled={comm.status === 'received'}
-                        onCheckedChange={() => toggleSelectRow(comm.id)}
-                      />
-                    </TableCell>
+                    {!isAgent && (
+                      <TableCell className="text-center">
+                        <Checkbox 
+                          checked={comm.status === 'received' ? true : selectedIds.has(comm.id)}
+                          disabled={comm.status === 'received'}
+                          onCheckedChange={() => toggleSelectRow(comm.id)}
+                        />
+                      </TableCell>
+                    )}
                     <TableCell>
                       <div className="font-medium">{comm.policy?.policy_number}</div>
-                      <div className="text-xs text-muted-foreground">{comm.policy?.client?.name}</div>
+                      <div className="text-xs text-muted-foreground">{comm.policy?.client?.name ?? '—'}</div>
                     </TableCell>
                     <TableCell className="font-medium">
                       {comm.policy?.insurer?.name}
@@ -436,13 +440,15 @@ export default function Commissions() {
                         {displayStatus}
                       </Badge>
                     </TableCell>
-                    <TableCell className="text-right">
-                      {comm.status === 'pending' && (
-                        <Button size="sm" variant="outline" onClick={() => openReceiveDialog(comm)}>
-                          <CheckCircle2 className="w-4 h-4 mr-2" /> Mark Received
-                        </Button>
-                      )}
-                    </TableCell>
+                    {!isAgent && (
+                      <TableCell className="text-right">
+                        {comm.status === 'pending' && (
+                          <Button size="sm" variant="outline" onClick={() => openReceiveDialog(comm)}>
+                            <CheckCircle2 className="w-4 h-4 mr-2" /> Mark Received
+                          </Button>
+                        )}
+                      </TableCell>
+                    )}
                   </TableRow>
                 );
               })
@@ -451,6 +457,7 @@ export default function Commissions() {
         </Table>
       </div>
 
+      {!isAgent && (
       <Dialog open={!!receivingId} onOpenChange={(open) => !open && setReceivingId(null)}>
         <DialogContent>
           <DialogHeader>
@@ -475,6 +482,7 @@ export default function Commissions() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      )}
     </div>
   );
 }

@@ -40,14 +40,54 @@ VITE_SUPABASE_ANON_KEY=<anon key>
 - Supabase RLS enforces multi-tenancy at the DB layer; every table has `agency_id` with the `current_user_agency_id()` helper
 - Privileged operations are Postgres functions called with `supabase.rpc(...)`, not a server:
   - `create_agency_with_owner` — signup: creates agency + owner row + seeds default Kenyan product lines
-  - `generate_monthly_report` — owner/admin only; computes the month's metrics and stores a `reports` row (runs under the caller's RLS)
+  - `generate_monthly_report` — owner/manager only; computes the month's metrics and stores a `reports` row (runs under the caller's RLS)
 - Signup flow: `supabase.auth.signUp` → `rpc('create_agency_with_owner')` → `refreshProfile()` — avoids the race where `SIGNED_IN` fires before the `users` row exists
-- Commission visibility is role-scoped (migration 003): owners/admins see the whole agency, agents see only commissions on their own policies
+- Access is role-scoped in the database (RLS + checked RPCs), not just in the UI; see "Roles & access" below
+- Team RPCs (all `SECURITY DEFINER`, role-checked inside): `create_invite`, `revoke_invite`, `get_invite_preview` (anon, by code), `accept_invite`, `reassign_client`, `change_member_role`, `remove_member`
+- Staff join by invite link (`/join?code=...`); the code is stored only as a sha256 hash and expires after 7 days
+
+## Roles & access
+
+Three fixed roles, enforced by Postgres RLS and role-checked RPCs. An Agent calling the API directly with their own token cannot see other agents' data either.
+
+| | Owner | Manager | Agent |
+|---|---|---|---|
+| Clients | All, full edit | All, full edit | Only clients assigned to them; no delete |
+| Policies | All, full edit | All, full edit | Only their own; no delete |
+| Commissions | All; mark received | All; mark received | Read only, on own policies |
+| Renewal reminders | All | All | Read only, on own policies |
+| Reports & company totals | Read, generate | Read, generate | None |
+| Insurers, product lines | Edit | Edit | Read |
+| Team list | All members | All members | Own row only |
+| Agency settings | Edit | Read | Read |
+| Invite staff | Managers and agents | Agents only | No |
+| Change roles, remove staff | Yes | No | No |
+
+Each agency has exactly one Owner. Removing a member deactivates them (history is kept) and moves their clients and active/pending policies to another member. Full design: `docs/superpowers/specs/2026-11-01-team-access-control-design.md`.
+
+Demo logins exist for the demo agency: `demo@ams.co.ke` (Owner), `manager@ams.co.ke` (Manager), `agent@ams.co.ke` (Agent). Passwords are held by the project owner.
 
 ## Database
 
-Supabase project: **ERP Demo** (`frzjhknbocuaduuduxkk`). Migrations 001–004 are applied.
+Supabase project: **ERP Demo** (`frzjhknbocuaduuduxkk`). Migrations 001–008 are applied
+(`006a` is its own file and must be run after 006; `007a` and `008a` were live follow-ups folded into `007` and `008`).
 New migrations go in `supabase/migrations/` and should be applied in order.
+
+| Migration | Adds |
+|---|---|
+| 001 | Initial schema and RLS |
+| 002 | Auto renewal reminders |
+| 003 | Agent-scoped commission RLS |
+| 004 | `generate_monthly_report` |
+| 005 | Lock down `SECURITY DEFINER` functions |
+| 006 | Team access control: roles, client assignment, role-scoped RLS, deactivation |
+| 006a | Guard: only owners/managers can change `policies.commission_received` |
+| 007 | Agency invites and invite RPCs |
+| 008 | Team management RPCs (reassign, change role, remove) |
+
+### Running the database tests
+
+`supabase/tests/` holds one script per feature (`006_team_access_control.sql`, `007_agency_invites.sql`, `008_team_management.sql`). Paste each file into the Supabase SQL editor, or run it through the Supabase MCP `execute_sql`. Each runs inside a transaction that is always rolled back (nothing is saved) and prints `ALL PASSED`; a failed assertion aborts the batch with the reason.
 
 ## Deploying (Vercel)
 
@@ -61,7 +101,8 @@ Required env vars: `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`.
 - 🔲 Phase 3: Commission & renewal tracking
 - 🔲 Phase 4: Reporting dashboard with Recharts
 - 🔲 Phase 5: Automated monthly reports (PDF + email/WhatsApp)
-- 🔲 Phase 6: Polish (mobile-first, role-based views, onboarding flow)
+- ✅ Team & access control: Owner / Manager / Agent roles, invites, team management, role-based views
+- 🔲 Phase 6: Polish (mobile-first, onboarding flow)
 
 ## Gotchas
 

@@ -32,7 +32,8 @@ const reminderSchema = z.object({
 type ReminderFormValues = z.infer<typeof reminderSchema>;
 
 export default function Renewals() {
-  const { agency, session } = useAuth();
+  const { agency, session, profile, isOwnerOrManager } = useAuth();
+  const isAgent = !!profile && !isOwnerOrManager;
   const { toast } = useToast();
   const createReminder = useCreateRenewalReminder();
   
@@ -179,7 +180,7 @@ export default function Renewals() {
               <TableHead>Agent</TableHead>
               <TableHead className="text-right">Expiry Date</TableHead>
               <TableHead>Reminders</TableHead>
-              <TableHead className="text-center">Action</TableHead>
+              {isOwnerOrManager && <TableHead className="text-center">Action</TableHead>}
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -188,7 +189,7 @@ export default function Renewals() {
               return (
                 <TableRow key={p.id}>
                   <TableCell>
-                    <div className="font-medium">{p.client?.name}</div>
+                    <div className="font-medium">{p.client?.name ?? '—'}</div>
                     <div className="text-xs text-muted-foreground">{p.client?.phone || p.client?.email || 'No contact info'}</div>
                   </TableCell>
                   <TableCell>
@@ -235,18 +236,20 @@ export default function Renewals() {
                       );
                     })()}
                   </TableCell>
-                  <TableCell className="text-center">
-                    <Button size="sm" variant="outline" className="gap-2" onClick={() => {
-                      setReminderPolicyId(p.id);
-                      form.reset({
-                        channel: 'email',
-                        reminder_date: new Date().toISOString().split('T')[0],
-                        notes: ''
-                      });
-                    }}>
-                      <BellRing className="w-3 h-3" /> Log Reminder
-                    </Button>
-                  </TableCell>
+                  {isOwnerOrManager && (
+                    <TableCell className="text-center">
+                      <Button size="sm" variant="outline" className="gap-2" onClick={() => {
+                        setReminderPolicyId(p.id);
+                        form.reset({
+                          channel: 'email',
+                          reminder_date: new Date().toISOString().split('T')[0],
+                          notes: ''
+                        });
+                      }}>
+                        <BellRing className="w-3 h-3" /> Log Reminder
+                      </Button>
+                    </TableCell>
+                  )}
                 </TableRow>
               );
             })}
@@ -260,7 +263,7 @@ export default function Renewals() {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Upcoming Renewals</h1>
+          <h1 className="text-3xl font-bold tracking-tight">{isAgent ? 'My Upcoming Renewals' : 'Upcoming Renewals'}</h1>
           <p className="text-muted-foreground">Don't miss a renewal. Track expiring policies for the next 90 days.</p>
         </div>
         <Button variant="secondary" onClick={handleExportCsv}>
@@ -362,19 +365,19 @@ export default function Renewals() {
                   <TableHead>Agent</TableHead>
                   <TableHead className="text-right">Expiry Date</TableHead>
                   <TableHead>Reminders</TableHead>
-                  <TableHead className="text-center">Action</TableHead>
+                  {isOwnerOrManager && <TableHead className="text-center">Action</TableHead>}
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {isOverdueLoading ? (
-                   <TableRow><TableCell colSpan={6} className="text-center py-8">Loading overdue renewals...</TableCell></TableRow>
+                   <TableRow><TableCell colSpan={isOwnerOrManager ? 6 : 5} className="text-center py-8">Loading overdue renewals...</TableCell></TableRow>
                 ) : !overdueRenewals || overdueRenewals.length === 0 ? (
-                   <TableRow><TableCell colSpan={6} className="text-center py-12 text-muted-foreground">No overdue policies.</TableCell></TableRow>
+                   <TableRow><TableCell colSpan={isOwnerOrManager ? 6 : 5} className="text-center py-12 text-muted-foreground">No overdue policies.</TableCell></TableRow>
                 ) : (
                   overdueRenewals.map(p => (
                     <TableRow key={p.id}>
                       <TableCell>
-                        <div className="font-medium">{p.client?.name}</div>
+                        <div className="font-medium">{p.client?.name ?? '—'}</div>
                         <div className="text-xs text-muted-foreground">{p.client?.phone || p.client?.email || 'No contact info'}</div>
                       </TableCell>
                       <TableCell>
@@ -422,18 +425,20 @@ export default function Renewals() {
                           );
                         })()}
                       </TableCell>
-                      <TableCell className="text-center">
-                        <Button size="sm" variant="outline" className="gap-2" onClick={() => {
-                          setReminderPolicyId(p.id);
-                          form.reset({
-                            channel: 'email',
-                            reminder_date: new Date().toISOString().split('T')[0],
-                            notes: ''
-                          });
-                        }}>
-                          <BellRing className="w-3 h-3" /> Log Reminder
-                        </Button>
-                      </TableCell>
+                      {isOwnerOrManager && (
+                        <TableCell className="text-center">
+                          <Button size="sm" variant="outline" className="gap-2" onClick={() => {
+                            setReminderPolicyId(p.id);
+                            form.reset({
+                              channel: 'email',
+                              reminder_date: new Date().toISOString().split('T')[0],
+                              notes: ''
+                            });
+                          }}>
+                            <BellRing className="w-3 h-3" /> Log Reminder
+                          </Button>
+                        </TableCell>
+                      )}
                     </TableRow>
                   ))
                 )}
