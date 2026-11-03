@@ -19,7 +19,9 @@
 --
 -- (The per-premium period default in _apply_line - period falls back
 -- to received_on - was applied live as migration
--- 010a_apply_line_period_default; this file is the full source.)
+-- 010a_apply_line_period_default, and the budget check in
+-- link_statement_line as 010b_link_requires_budget; this file is the
+-- full source.)
 -- ============================================================
 
 DROP FUNCTION IF EXISTS public.mark_overdue_commissions();
@@ -271,7 +273,8 @@ GRANT  EXECUTE ON FUNCTION public.create_insurer_receipt(UUID, DATE, NUMERIC, TE
 
 -- ------------------------------------------------------------
 -- link_statement_line: match an unmatched line and apply it from the
--- receipt's unapplied money (capped by it).
+-- receipt's unapplied money (annual lines capped by it; per-premium
+-- lines need the full commission).
 -- ------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.link_statement_line(p_line_id UUID, p_policy_id UUID)
 RETURNS JSONB
@@ -283,6 +286,7 @@ DECLARE
   v_agency  UUID := public.current_user_agency_id();
   v_rcpt    insurer_receipts;
   v_line    statement_lines;
+  v_basis   TEXT;
   v_budget  NUMERIC;
   v_applied NUMERIC;
 BEGIN
@@ -305,7 +309,7 @@ BEGIN
     RAISE EXCEPTION 'That line is already matched';
   END IF;
 
-  PERFORM 1 FROM policies
+  SELECT commission_basis INTO v_basis FROM policies
    WHERE id = p_policy_id AND agency_id = v_agency AND insurer_id = v_rcpt.insurer_id;
   IF NOT FOUND THEN
     RAISE EXCEPTION 'That policy is not with this insurer';
@@ -313,10 +317,27 @@ BEGIN
 
   PERFORM 1 FROM commission_transactions WHERE policy_id = p_policy_id ORDER BY id FOR UPDATE;
 
-  UPDATE statement_lines SET policy_id = p_policy_id WHERE id = p_line_id;
-
   SELECT v_rcpt.amount - COALESCE(SUM(amount), 0) INTO v_budget
     FROM commission_allocations WHERE receipt_id = v_rcpt.id;
+
+  -- A line that would apply something needs money on the receipt, or
+  -- it would end up matched with nothing applied (and could not be
+  -- re-linked). Per-premium lines are applied in full, as in create.
+  -- Lines that apply nothing (commission <= 0, or an annual policy
+  -- with nothing outstanding) may still be linked.
+  IF v_line.commission > 0 THEN
+    IF v_basis = 'per_premium' THEN
+      IF v_budget < v_line.commission THEN
+        RAISE EXCEPTION 'Applied amount exceeds the receipt amount';
+      END IF;
+    ELSIF v_budget <= 0
+          AND EXISTS (SELECT 1 FROM commission_transactions
+                       WHERE policy_id = p_policy_id AND amount - amount_received > 0) THEN
+      RAISE EXCEPTION 'Applied amount exceeds the receipt amount';
+    END IF;
+  END IF;
+
+  UPDATE statement_lines SET policy_id = p_policy_id WHERE id = p_line_id;
 
   v_applied := public._apply_line(p_line_id, v_budget);
 

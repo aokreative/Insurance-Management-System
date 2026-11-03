@@ -547,21 +547,113 @@ BEGIN
       ASSERT v_msg = 'Receipt not found' AND v_st = 'P0002', format('link unknown: %s / %s', v_st, v_msg);
     END;
 
-    -- A statement commission keeps existing while another allocation remains
-    r := create_insurer_receipt(ins1, DATE '2026-10-21', 300, NULL, NULL,
+    -- link of a per-premium line with enough money: statement commission in full
+    r := create_insurer_receipt(ins1, DATE '2026-10-21', 800, NULL, NULL,
            jsonb_build_array(jsonb_build_object('commission',800,'period','2026-09-01','policy_id',NULL)),
            '[]'::jsonb);
     SELECT id INTO ln_id FROM statement_lines WHERE receipt_id = (r->>'receipt_id')::uuid;
-    PERFORM link_statement_line(ln_id, l1);   -- 300 of 800 applied (capped)
-    SELECT id, status, amount_received INTO c_l, v_txt, v_num
+    r := link_statement_line(ln_id, l1);
+    ASSERT (r->>'applied')::numeric = 800, format('link per-premium: applied expected 800, got %s', r->>'applied');
+    SELECT source, status, amount_received INTO v_src, v_txt, v_num
       FROM commission_transactions WHERE policy_id = l1 AND period = DATE '2026-09-01';
-    ASSERT v_txt = 'part_paid' AND v_num = 300, format('link per-premium capped: got %s / %s', v_txt, v_num);
-    PERFORM create_insurer_receipt(ins1, DATE '2026-10-22', 500, NULL, NULL, '[]'::jsonb,
+    ASSERT v_src = 'statement' AND v_txt = 'received' AND v_num = 800,
+      format('link per-premium: got %s / %s / %s', v_src, v_txt, v_num);
+
+    -- A statement commission is kept while another allocation remains
+    RESET ROLE;
+    INSERT INTO commission_transactions (policy_id, agency_id, amount, period, expected_date, source)
+    VALUES (l1, ag, 800, DATE '2026-08-01', DATE '2026-08-01', 'statement') RETURNING id INTO c_l;
+    SET LOCAL ROLE authenticated;
+    r := create_insurer_receipt(ins1, DATE '2026-10-22', 300, NULL, NULL, '[]'::jsonb,
+           jsonb_build_array(jsonb_build_object('commission_id', c_l, 'amount', 300)));
+    PERFORM create_insurer_receipt(ins1, DATE '2026-10-23', 500, NULL, NULL, '[]'::jsonb,
       jsonb_build_array(jsonb_build_object('commission_id', c_l, 'amount', 500)));
     SELECT id INTO al_l FROM commission_allocations WHERE receipt_id = (r->>'receipt_id')::uuid;
     PERFORM undo_commission_allocation(al_l);
     SELECT status, amount_received INTO v_txt, v_num FROM commission_transactions WHERE id = c_l;
     ASSERT v_txt = 'part_paid' AND v_num = 500, format('undo with other allocation: got %s / %s', v_txt, v_num);
+
+    RAISE EXCEPTION USING ERRCODE = 'ZZ001';
+  EXCEPTION WHEN SQLSTATE 'ZZ001' THEN NULL;
+  END;
+
+  -- ---------------------------------------------------------
+  -- 11b. link_statement_line needs money for lines that apply something
+  -- ---------------------------------------------------------
+  BEGIN
+    PERFORM set_config('request.jwt.claims', json_build_object('sub', o, 'role','authenticated')::text, true);
+    SET LOCAL ROLE authenticated;
+
+    -- fully applied receipt: matched P1 1000 + unmatched 200 (+ unmatched -50)
+    r := create_insurer_receipt(ins1, DATE '2026-03-01', 1000, NULL, NULL,
+           jsonb_build_array(
+             jsonb_build_object('commission',1000,'policy_id',p1),
+             jsonb_build_object('commission',200,'policy_id',NULL),
+             jsonb_build_object('commission',-50,'policy_id',NULL)),
+           '[]'::jsonb);
+    ASSERT (r->>'unapplied')::numeric = 0, format('11b fixture: unapplied expected 0, got %s', r->>'unapplied');
+    r_id := (r->>'receipt_id')::uuid;
+    SELECT id INTO ln_id FROM statement_lines WHERE receipt_id = r_id AND line_no = 2;
+
+    BEGIN
+      PERFORM link_statement_line(ln_id, p2);
+      RAISE EXCEPTION 'FAIL: annual line linked on a fully applied receipt';
+    EXCEPTION WHEN OTHERS THEN
+      GET STACKED DIAGNOSTICS v_msg = MESSAGE_TEXT;
+      ASSERT v_msg = 'Applied amount exceeds the receipt amount', format('link annual no budget: unexpected message %s', v_msg);
+    END;
+    SELECT policy_id INTO ln_x FROM statement_lines WHERE id = ln_id;
+    ASSERT ln_x IS NULL, 'link annual no budget: line must stay unmatched';
+
+    BEGIN
+      PERFORM link_statement_line(ln_id, l1);
+      RAISE EXCEPTION 'FAIL: per-premium line linked on a fully applied receipt';
+    EXCEPTION WHEN OTHERS THEN
+      GET STACKED DIAGNOSTICS v_msg = MESSAGE_TEXT;
+      ASSERT v_msg = 'Applied amount exceeds the receipt amount', format('link per-premium no budget: unexpected message %s', v_msg);
+    END;
+    SELECT policy_id INTO ln_x FROM statement_lines WHERE id = ln_id;
+    ASSERT ln_x IS NULL, 'link per-premium no budget: line must stay unmatched';
+    SELECT count(*) INTO n FROM commission_transactions WHERE policy_id = l1;
+    ASSERT n = 0, format('link per-premium no budget: no commission expected, got %s', n);
+
+    -- a line that applies nothing may still be linked
+    SELECT id INTO ln_id FROM statement_lines WHERE receipt_id = r_id AND line_no = 3;
+    r := link_statement_line(ln_id, p2);
+    ASSERT (r->>'applied')::numeric = 0, format('link negative line: applied expected 0, got %s', r->>'applied');
+    SELECT policy_id INTO ln_x FROM statement_lines WHERE id = ln_id;
+    ASSERT ln_x = p2, 'link negative line: line should be matched';
+
+    -- per-premium with some money, but less than the line -> raises
+    r := create_insurer_receipt(ins1, DATE '2026-03-02', 1100, NULL, NULL,
+           jsonb_build_array(
+             jsonb_build_object('commission',1000,'policy_id',p2),
+             jsonb_build_object('commission',200,'policy_id',NULL)),
+           '[]'::jsonb);
+    SELECT id INTO ln_id FROM statement_lines WHERE receipt_id = (r->>'receipt_id')::uuid AND line_no = 2;
+    BEGIN
+      PERFORM link_statement_line(ln_id, l1);
+      RAISE EXCEPTION 'FAIL: per-premium line linked with less money than its commission';
+    EXCEPTION WHEN OTHERS THEN
+      GET STACKED DIAGNOSTICS v_msg = MESSAGE_TEXT;
+      ASSERT v_msg = 'Applied amount exceeds the receipt amount', format('link per-premium short budget: unexpected message %s', v_msg);
+    END;
+    SELECT policy_id INTO ln_x FROM statement_lines WHERE id = ln_id;
+    ASSERT ln_x IS NULL, 'link per-premium short budget: line must stay unmatched';
+
+    -- annual policy with nothing outstanding (P1 fully received) may be linked
+    r := create_insurer_receipt(ins1, DATE '2026-03-03', 4000, NULL, NULL,
+           jsonb_build_array(
+             jsonb_build_object('commission',4000,'policy_id',p1),
+             jsonb_build_object('commission',100,'policy_id',NULL)),
+           '[]'::jsonb);
+    SELECT status INTO v_txt FROM commission_transactions WHERE id = c_p1;
+    ASSERT v_txt = 'received', format('11b: P1 expected received, got %s', v_txt);
+    SELECT id INTO ln_id FROM statement_lines WHERE receipt_id = (r->>'receipt_id')::uuid AND line_no = 2;
+    r := link_statement_line(ln_id, p1);
+    ASSERT (r->>'applied')::numeric = 0, format('link to settled policy: applied expected 0, got %s', r->>'applied');
+    SELECT policy_id INTO ln_x FROM statement_lines WHERE id = ln_id;
+    ASSERT ln_x = p1, 'link to settled policy: line should be matched';
 
     RAISE EXCEPTION USING ERRCODE = 'ZZ001';
   EXCEPTION WHEN SQLSTATE 'ZZ001' THEN NULL;
