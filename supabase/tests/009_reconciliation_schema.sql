@@ -24,6 +24,8 @@ DECLARE
   p_pp  UUID := gen_random_uuid();
   ct    UUID;
   ct_x  UUID;
+  p_ann2 UUID := gen_random_uuid();
+  ct2   UUID;
   r1    UUID;
   r2    UUID;
   r3    UUID;
@@ -269,6 +271,61 @@ BEGIN
   UPDATE commission_transactions SET amount_received = amount WHERE id = ct_x;
   SELECT status, amount_received INTO v_txt, v_num FROM commission_transactions WHERE id = ct_x;
   ASSERT v_txt = 'received' AND v_num = 500, format('conversion fixture: got %s / %s', v_txt, v_num);
+
+  -- ---------------------------------------------------------
+  -- Policy tally follows commission moves and deletes
+  -- (ct: 6000 received on p_ann via r1; r2 has 5000 unapplied)
+  -- ---------------------------------------------------------
+  INSERT INTO policies (id, agency_id, client_id, insurer_id, product_line_id, agent_id,
+                        policy_number, premium_amount, commission_rate, commission_basis,
+                        start_date, expiry_date, status)
+  VALUES (p_ann2, ag, cl, ins, pl, a1, 'T009-ANN2', 50000, 10, 'annual',
+          DATE '2026-01-20', DATE '2027-01-19', 'active');
+  SELECT id INTO ct2 FROM commission_transactions WHERE policy_id = p_ann2;
+
+  PERFORM set_config('request.jwt.claims', json_build_object('sub', o, 'role','authenticated')::text, true);
+  INSERT INTO commission_allocations (agency_id, receipt_id, commission_id, amount)
+  VALUES (ag, r2, ct2, 1000);
+  SELECT commission_received INTO v_num FROM policies WHERE id = p_ann2;
+  ASSERT v_num = 1000, format('p_ann2 after 1000 allocated: expected 1000, got %s', v_num);
+
+  -- p_ann gets a second commission (500 received via r2) so a delete
+  -- has a remaining sum to drop to
+  INSERT INTO commission_transactions (policy_id, agency_id, amount, expected_date)
+  VALUES (p_ann, ag, 2000, DATE '2026-04-01') RETURNING id INTO ct_x;
+  INSERT INTO commission_allocations (agency_id, receipt_id, commission_id, amount)
+  VALUES (ag, r2, ct_x, 500);
+  SELECT commission_received INTO v_num FROM policies WHERE id = p_ann;
+  ASSERT v_num = 6500, format('p_ann before delete: expected 6500, got %s', v_num);
+
+  -- Owner deletes the allocated commission ct: its allocation cascades,
+  -- the policy drops to the remaining sum
+  SET LOCAL ROLE authenticated;
+  DELETE FROM commission_transactions WHERE id = ct;
+  GET DIAGNOSTICS n = ROW_COUNT;
+  ASSERT n = 1, format('owner deleting commission: expected 1 row, got %s', n);
+  RESET ROLE;
+  SELECT commission_received INTO v_num FROM policies WHERE id = p_ann;
+  ASSERT v_num = 500, format('after delete: p_ann expected 500, got %s', v_num);
+  SELECT count(*) INTO n FROM commission_allocations WHERE receipt_id = r1;
+  ASSERT n = 0, format('after delete: r1 allocations expected 0, got %s', n);
+
+  -- Owner moves the allocated commission ct2 (1000) from p_ann2 to p_ann
+  SET LOCAL ROLE authenticated;
+  UPDATE commission_transactions SET policy_id = p_ann WHERE id = ct2;
+  GET DIAGNOSTICS n = ROW_COUNT;
+  ASSERT n = 1, format('owner moving commission: expected 1 row, got %s', n);
+  RESET ROLE;
+  SELECT commission_received INTO v_num FROM policies WHERE id = p_ann;
+  ASSERT v_num = 1500, format('after move: p_ann expected 1500, got %s', v_num);
+  SELECT commission_received INTO v_num FROM policies WHERE id = p_ann2;
+  ASSERT v_num = 0, format('after move: p_ann2 expected 0, got %s', v_num);
+
+  -- Deleting a policy with allocated commissions still works and
+  -- returns the money to the receipt (no allocations left on r2)
+  DELETE FROM policies WHERE id = p_ann;
+  SELECT count(*) INTO n FROM commission_allocations WHERE receipt_id = r2;
+  ASSERT n = 0, format('after policy delete: r2 allocations expected 0, got %s', n);
 END;
 $$;
 

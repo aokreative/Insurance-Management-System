@@ -11,7 +11,11 @@
 --      commission_allocations, indexes, RLS (owner/manager SELECT
 --      only; writes go through SECURITY DEFINER RPCs added later).
 --   3. Triggers: derived status + amount_received guard,
+--      policy tally recompute on commission change/delete,
 --      allocation recompute, expected commission on policy insert.
+--      (3b and the 3c change were applied live as migration
+--      009a_recompute_on_commission_change; this file is the
+--      full source.)
 --
 -- RPCs, the receipts storage bucket and the opening-balance
 -- backfill come in later migrations.
@@ -198,11 +202,79 @@ CREATE TRIGGER trg_commission_status
   EXECUTE FUNCTION public.commission_derive_status();
 
 -- ------------------------------------------------------------
--- 3b. Allocation recompute: re-checks the allocation rules on
+-- 3b. Policy tally: policies.commission_received = sum of its
+--     commissions' amount_received. One helper, called whenever a
+--     commission row's amount_received or policy_id changes or the
+--     row is deleted (incl. cascades from policy/commission deletes).
+--     The policy update goes through the 006a guard: callers are
+--     owner/manager (RLS on commission_transactions) or no-JWT.
+-- ------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.recompute_policy_commission_received(p_policy_id UUID)
+RETURNS VOID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_sum       NUMERIC;
+  v_prev_flag TEXT;
+BEGIN
+  IF p_policy_id IS NULL THEN
+    RETURN;
+  END IF;
+
+  SELECT COALESCE(SUM(amount_received), 0) INTO v_sum
+    FROM commission_transactions WHERE policy_id = p_policy_id;
+
+  v_prev_flag := COALESCE(current_setting('app.allocating', true), '');
+  PERFORM set_config('app.allocating', 'on', true);
+
+  -- A policy deleted in this statement (cascade) simply matches no row
+  UPDATE policies
+     SET commission_received = v_sum
+   WHERE id = p_policy_id
+     AND commission_received IS DISTINCT FROM v_sum;
+
+  PERFORM set_config('app.allocating', v_prev_flag, true);
+END;
+$$;
+
+REVOKE EXECUTE ON FUNCTION public.recompute_policy_commission_received(UUID) FROM PUBLIC, anon, authenticated;
+
+CREATE OR REPLACE FUNCTION public.commission_policy_recompute()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  IF TG_OP = 'DELETE' THEN
+    PERFORM public.recompute_policy_commission_received(OLD.policy_id);
+    RETURN NULL;
+  END IF;
+
+  IF NEW.policy_id IS DISTINCT FROM OLD.policy_id THEN
+    PERFORM public.recompute_policy_commission_received(OLD.policy_id);
+    PERFORM public.recompute_policy_commission_received(NEW.policy_id);
+  ELSIF NEW.amount_received IS DISTINCT FROM OLD.amount_received THEN
+    PERFORM public.recompute_policy_commission_received(NEW.policy_id);
+  END IF;
+  RETURN NULL;
+END;
+$$;
+
+REVOKE EXECUTE ON FUNCTION public.commission_policy_recompute() FROM PUBLIC, anon, authenticated;
+
+DROP TRIGGER IF EXISTS trg_commission_policy_recompute ON commission_transactions;
+CREATE TRIGGER trg_commission_policy_recompute
+  AFTER DELETE OR UPDATE OF policy_id, amount_received ON commission_transactions
+  FOR EACH ROW
+  EXECUTE FUNCTION public.commission_policy_recompute();
+
+-- ------------------------------------------------------------
+-- 3c. Allocation recompute: re-checks the allocation rules on
 --     insert, then recomputes the commission's amount_received
---     and the policy's commission_received (the policy update
---     goes through the 006a guard: callers are owner/manager
---     RPCs or no-JWT).
+--     (which in turn recomputes the policy via 3b).
 -- ------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.commission_allocation_recompute()
 RETURNS TRIGGER
@@ -255,15 +327,12 @@ BEGIN
   v_prev_flag := COALESCE(current_setting('app.allocating', true), '');
   PERFORM set_config('app.allocating', 'on', true);
 
+  -- The policy tally is recomputed by trg_commission_policy_recompute
+  -- (UPDATE OF amount_received), so it is not repeated here.
   UPDATE commission_transactions
      SET amount_received = (SELECT COALESCE(SUM(amount), 0) FROM commission_allocations
                              WHERE commission_id = v_row.commission_id)
    WHERE id = v_row.commission_id;
-
-  UPDATE policies
-     SET commission_received = (SELECT COALESCE(SUM(amount_received), 0) FROM commission_transactions
-                                 WHERE policy_id = v_policy_id)
-   WHERE id = v_policy_id;
 
   PERFORM set_config('app.allocating', v_prev_flag, true);
   RETURN NULL;
@@ -279,7 +348,7 @@ CREATE TRIGGER trg_allocation_recompute
   EXECUTE FUNCTION public.commission_allocation_recompute();
 
 -- ------------------------------------------------------------
--- 3c. Expected commission on policy insert (annual basis only).
+-- 3d. Expected commission on policy insert (annual basis only).
 --     SECURITY DEFINER so agents' new policies still get one.
 -- ------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.create_expected_commission()
