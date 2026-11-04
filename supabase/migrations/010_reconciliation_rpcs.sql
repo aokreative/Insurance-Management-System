@@ -351,6 +351,9 @@ GRANT  EXECUTE ON FUNCTION public.link_statement_line(UUID, UUID) TO authenticat
 -- ------------------------------------------------------------
 -- undo_commission_allocation: delete the allocation; a statement-
 -- sourced commission left with no allocations is deleted too.
+-- SUPERSEDED: replaced by 012_reconciliation_followups.sql (which also
+-- unmatches a statement line left with no allocations); 012 is the
+-- full source for this function from now on.
 -- ------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.undo_commission_allocation(p_allocation_id UUID)
 RETURNS VOID
