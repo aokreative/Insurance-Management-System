@@ -270,3 +270,68 @@ export function useInsurerMoneySummary() {
     enabled: !!session && !!agency?.id && isOwnerOrManager,
   });
 }
+
+export interface ReceivablePolicy {
+  id: string;
+  policy_number: string;
+  commission_basis: 'annual' | 'per_premium';
+  clientName: string;
+  outstandingCents: number;
+}
+
+export interface ReceivableCommission {
+  id: string;
+  policyNumber: string;
+  clientName: string;
+  period: string | null;
+  expectedDate: string | null;
+  remainingCents: number;
+}
+
+/** An insurer's policies (with outstanding commission in cents) and its commissions still to collect. */
+export function useInsurerReceivables(insurerId: string | undefined) {
+  const { agency, session, isOwnerOrManager } = useAuth();
+  return useQuery({
+    queryKey: ['insurer-receivables', agency?.id, insurerId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('policies')
+        .select(
+          'id, policy_number, commission_basis, client:clients(name), commissions:commission_transactions(id, amount, amount_received, expected_date, period)',
+        )
+        .eq('agency_id', agency?.id)
+        .eq('insurer_id', insurerId)
+        .order('policy_number');
+      if (error) throw error;
+      const policies: ReceivablePolicy[] = [];
+      const commissions: ReceivableCommission[] = [];
+      for (const p of (data ?? []) as any[]) {
+        let outstanding = 0;
+        for (const c of p.commissions ?? []) {
+          const remaining = Math.max(Math.round(num(c.amount) * 100) - Math.round(num(c.amount_received) * 100), 0);
+          outstanding += remaining;
+          if (remaining > 0) {
+            commissions.push({
+              id: c.id,
+              policyNumber: p.policy_number,
+              clientName: p.client?.name ?? '',
+              period: c.period ?? null,
+              expectedDate: c.expected_date ?? null,
+              remainingCents: remaining,
+            });
+          }
+        }
+        policies.push({
+          id: p.id,
+          policy_number: p.policy_number,
+          commission_basis: p.commission_basis,
+          clientName: p.client?.name ?? '',
+          outstandingCents: p.commission_basis === 'per_premium' ? 0 : outstanding,
+        });
+      }
+      commissions.sort((a, b) => (a.expectedDate ?? '').localeCompare(b.expectedDate ?? ''));
+      return { policies, commissions };
+    },
+    enabled: !!session && !!agency?.id && !!insurerId && isOwnerOrManager,
+  });
+}
