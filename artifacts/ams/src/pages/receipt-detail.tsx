@@ -3,7 +3,7 @@ import { Link, useLocation, useParams } from 'wouter';
 import { useAuth } from '@/contexts/AuthContext';
 import { usePolicies } from '@/hooks/queries';
 import {
-  useReceipt, useLinkStatementLine, useUndoAllocation, useDeleteReceipt, getReceiptPdfUrl,
+  useReceipt, useLinkStatementLine, useApplyReceiptAllocations, useInsurerReceivables, useUndoAllocation, useDeleteReceipt, getReceiptPdfUrl,
   type ReceiptLineWithPolicy,
 } from '@/hooks/receipts';
 import { Button } from '@/components/ui/button';
@@ -16,6 +16,9 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import { AllocateOutstanding, allocationCents, type AllocationState } from '@/components/receipts/AllocateOutstanding';
+import { formatKes } from '@/lib/receipt-grid';
+import { toCents } from '@/lib/reconcile';
 import { useToast } from '@/hooks/use-toast';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import { ArrowLeft, FileText, Trash2 } from 'lucide-react';
@@ -30,10 +33,14 @@ export default function ReceiptDetail() {
   const linkLine = useLinkStatementLine();
   const undo = useUndoAllocation();
   const deleteReceipt = useDeleteReceipt();
+  const applyMoney = useApplyReceiptAllocations();
 
   const [linkingLine, setLinkingLine] = useState<ReceiptLineWithPolicy | null>(null);
   const [policySearch, setPolicySearch] = useState('');
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [applyOpen, setApplyOpen] = useState(false);
+  const [allocState, setAllocState] = useState<AllocationState>({});
+  const { data: receivables } = useInsurerReceivables(applyOpen ? receipt?.insurer_id : undefined);
   const { data: insurerPolicies } = usePolicies(receipt ? { insurerId: receipt.insurer_id } : undefined);
 
   const showError = (err: Error) => toast({ title: 'Error', description: err.message, variant: 'destructive' });
@@ -105,6 +112,26 @@ export default function ReceiptDetail() {
     });
   };
 
+  const unappliedCents = toCents(receipt.amount)! - receipt.allocations.reduce((s, a) => s + toCents(a.amount)!, 0);
+  const applyCommissions = receivables?.commissions ?? [];
+  const pickedCents = applyCommissions.reduce((s, c) => s + allocationCents(c, allocState[c.id]), 0);
+  const overCents = pickedCents - unappliedCents;
+
+  const handleApply = () => {
+    const allocations = applyCommissions
+      .map((c) => ({ commissionId: c.id, cents: allocationCents(c, allocState[c.id]) }))
+      .filter((a) => a.cents > 0)
+      .map((a) => ({ commissionId: a.commissionId, amount: a.cents / 100 }));
+    applyMoney.mutate({ receiptId: receipt.id, allocations }, {
+      onSuccess: (res) => {
+        toast({ title: `Applied KES ${Number(res.applied).toLocaleString('en-KE')} — KES ${Number(res.unapplied).toLocaleString('en-KE')} still unapplied` });
+        setApplyOpen(false);
+        setAllocState({});
+      },
+      onError: showError,
+    });
+  };
+
   const canDelete = !receipt.is_opening_balance && receipt.allocations.length === 0;
 
   return (
@@ -121,6 +148,9 @@ export default function ReceiptDetail() {
           </p>
         </div>
         <div className="flex gap-2">
+          {unappliedCents > 0 && (
+            <Button onClick={() => { setAllocState({}); setApplyOpen(true); }}>Apply unapplied money</Button>
+          )}
           {receipt.file_path && (
             <Button variant="outline" onClick={openPdf}><FileText className="w-4 h-4 mr-2" /> View PDF</Button>
           )}
@@ -241,6 +271,25 @@ export default function ReceiptDetail() {
                 <div className="text-xs text-muted-foreground">{p.client?.name ?? '-'}</div>
               </button>
             ))}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={applyOpen} onOpenChange={(open) => { setApplyOpen(open); if (!open) setAllocState({}); }}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Apply unapplied money</DialogTitle>
+            <DialogDescription>
+              KES {formatKes(unappliedCents)} is unapplied on this receipt. Tick the {receipt.insurer?.name ?? 'insurer'} commissions it pays.
+            </DialogDescription>
+          </DialogHeader>
+          <AllocateOutstanding commissions={applyCommissions} state={allocState} onChange={setAllocState} />
+          {overCents > 0 && (
+            <div className="text-sm text-destructive">Applied amount is KES {formatKes(overCents)} more than the unapplied money</div>
+          )}
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setApplyOpen(false)}>Cancel</Button>
+            <Button onClick={handleApply} disabled={applyMoney.isPending || pickedCents <= 0 || overCents > 0}>Confirm</Button>
           </div>
         </DialogContent>
       </Dialog>

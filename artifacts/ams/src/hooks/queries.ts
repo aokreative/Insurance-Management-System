@@ -441,28 +441,6 @@ export function useCommissions(filters?: { status?: string }) {
   });
 }
 
-export function useUpdateCommission() {
-  const queryClient = useQueryClient();
-  
-  return useMutation({
-    mutationFn: async ({ id, ...transaction }: Partial<CommissionTransaction> & { id: string }) => {
-      const { data, error } = await supabase
-        .from('commission_transactions')
-        .update(transaction)
-        .eq('id', id)
-        .select()
-        .single();
-      if (error) throw error;
-      
-      return data as CommissionTransaction;
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['commissions'] });
-      queryClient.invalidateQueries({ queryKey: ['policies'] });
-    },
-  });
-}
-
 export function useDeleteCommission() {
   const queryClient = useQueryClient();
   const { agency } = useAuth();

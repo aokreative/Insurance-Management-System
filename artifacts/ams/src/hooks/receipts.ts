@@ -183,6 +183,21 @@ export function useUndoAllocation() {
   });
 }
 
+export function useApplyReceiptAllocations() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ receiptId, allocations }: { receiptId: string; allocations: { commissionId: string; amount: number }[] }) => {
+      const { data, error } = await supabase.rpc('apply_receipt_allocations', {
+        p_receipt_id: receiptId,
+        p_allocations: allocations.map((a) => ({ commission_id: a.commissionId, amount: a.amount })),
+      });
+      if (error) throw new Error(error.message);
+      return data as { applied: number; unapplied: number };
+    },
+    onSuccess: () => invalidateReceiptQueries(qc),
+  });
+}
+
 export async function removeReceiptPdf(path: string): Promise<void> {
   const { error } = await supabase.storage.from('receipts').remove([path]);
   if (error) throw new Error(error.message);
