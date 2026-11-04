@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCommissions, useCreateCommission, usePolicies } from '@/hooks/queries';
 import { useCreateReceipt } from '@/hooks/receipts';
+import { toCents, fromCents } from '@/lib/reconcile';
 import { Link } from 'wouter';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
@@ -67,7 +68,8 @@ export default function Commissions() {
     c.policy?.insurer?.name?.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  const remainingOf = (c: any) => Math.max((Number(c.amount) || 0) - (Number(c.amount_received) || 0), 0);
+  const remainingCentsOf = (c: any) => Math.max((toCents(Number(c.amount) || 0) ?? 0) - (toCents(Number(c.amount_received) || 0) ?? 0), 0);
+  const remainingOf = (c: any) => fromCents(remainingCentsOf(c));
   const today = new Date().toISOString().split('T')[0];
   const isUnpaid = (c: any) => c.status === 'pending' || c.status === 'part_paid';
   const isOverdueRow = (c: any) => isUnpaid(c) && !!c.expected_date && c.expected_date < today;
@@ -121,7 +123,7 @@ export default function Commissions() {
   const selectedComms = (commissions ?? []).filter(c => selectedIds.has(c.id) && remainingOf(c) > 0);
   const selectedInsurerIds = new Set(selectedComms.map(c => c.policy?.insurer?.id));
   const sameInsurer = selectedComms.length > 0 && selectedInsurerIds.size === 1;
-  const selectedTotal = selectedComms.reduce((sum, c) => sum + remainingOf(c), 0);
+  const selectedTotal = fromCents(selectedComms.reduce((sum, c) => sum + remainingCentsOf(c), 0));
 
   const showError = (err: Error) => toast({ title: 'Error', description: err.message, variant: 'destructive' });
 
@@ -168,9 +170,14 @@ export default function Commissions() {
   };
 
   const handleReceive = () => {
-    const amount = parseFloat(payAmount);
+    const cents = toCents(payAmount);
     const insurerId = payingComm?.policy?.insurer?.id;
-    if (!payingComm || !insurerId || !(amount > 0)) return;
+    if (!payingComm || !insurerId || cents === null || cents <= 0) return;
+    if (cents > remainingCentsOf(payingComm)) {
+      toast({ title: 'Error', description: `Amount exceeds the remaining KES ${remainingOf(payingComm).toLocaleString('en-KE')}`, variant: 'destructive' });
+      return;
+    }
+    const amount = fromCents(cents);
     createReceipt.mutate({
       insurerId,
       receivedOn: payDate,
@@ -528,7 +535,7 @@ export default function Commissions() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setPayingComm(null)}>Cancel</Button>
-            <Button onClick={handleReceive} disabled={createReceipt.isPending || !(parseFloat(payAmount) > 0) || !payDate}>
+            <Button onClick={handleReceive} disabled={createReceipt.isPending || !((toCents(payAmount) ?? 0) > 0) || !payDate}>
               {createReceipt.isPending ? "Saving..." : "Record payment"}
             </Button>
           </DialogFooter>

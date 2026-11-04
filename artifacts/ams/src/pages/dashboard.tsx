@@ -7,7 +7,7 @@ import { FileText, DollarSign, CalendarClock, AlertCircle } from 'lucide-react';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { startOfMonth, endOfMonth, addDays, startOfDay } from 'date-fns';
+import { startOfMonth, endOfMonth, addDays, startOfDay, format } from 'date-fns';
 import { OnboardingChecklist } from '@/components/OnboardingChecklist';
 import { projectedMonthlyCommission } from '@/lib/projection';
 
@@ -55,20 +55,35 @@ export default function Dashboard() {
       // 4. Commissions this month (expected & received)
       const { data: commissionsThisMonth } = await supabase
         .from('commission_transactions')
-        .select('amount, status')
+        .select('amount, amount_received, status')
         .eq('agency_id', agency.id)
         .gte('expected_date', startOfCurrentMonth)
         .lte('expected_date', endOfCurrentMonth);
         
       const expectedThisMonth = commissionsThisMonth?.reduce((sum, c) => sum + (c.amount || 0), 0) || 0;
-      const receivedThisMonth = commissionsThisMonth?.filter(c => c.status === 'received').reduce((sum, c) => sum + (c.amount || 0), 0) || 0;
+      // Money actually received this month. Owner/Manager: allocations of receipts dated this month.
+      // Agents cannot read receipts: fall back to amount_received on this month's commissions.
+      let receivedThisMonth = 0;
+      if (isOwnerOrManager) {
+        const { data: allocs } = await supabase
+          .from('commission_allocations')
+          .select('amount, receipt:insurer_receipts!inner(received_on)')
+          .eq('agency_id', agency.id)
+          .gte('receipt.received_on', format(startOfMonth(new Date()), 'yyyy-MM-dd'))
+          .lte('receipt.received_on', format(endOfMonth(new Date()), 'yyyy-MM-dd'));
+        receivedThisMonth = (allocs ?? []).reduce((sum, a: any) => sum + (Number(a.amount) || 0), 0);
+      } else {
+        receivedThisMonth = (commissionsThisMonth ?? [])
+          .filter(c => c.status === 'received' || c.status === 'part_paid')
+          .reduce((sum, c) => sum + (Number(c.amount_received) || 0), 0);
+      }
       
       // 5. Overdue commissions
       const { count: overdueCount } = await supabase
         .from('commission_transactions')
         .select('*', { count: 'exact', head: true })
         .eq('agency_id', agency.id)
-        .eq('status', 'pending')
+        .in('status', ['pending', 'part_paid'])
         .lt('expected_date', today.split('T')[0]);
 
       // 6. Recent policies

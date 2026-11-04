@@ -717,15 +717,26 @@ export function useNewClientsPerMonth() {
 
 /** YTD summary KPIs for the reports header */
 export function useYtdSummary() {
-  const { agency, session } = useAuth();
+  const { agency, session, isOwnerOrManager } = useAuth();
   return useQuery({
-    queryKey: ['chart-ytd-summary', agency?.id],
+    queryKey: ['chart-ytd-summary', agency?.id, isOwnerOrManager],
     queryFn: async () => {
       const jan1 = `${new Date().getFullYear()}-01-01`;
       const [{ data: policies }, { data: clients }, { data: commRx }] = await Promise.all([
         supabase.from('policies').select('premium_amount, commission_expected, commission_received, status').eq('agency_id', agency?.id),
         supabase.from('clients').select('id').eq('agency_id', agency?.id).gte('created_at', jan1),
-        supabase.from('commission_transactions').select('amount').eq('agency_id', agency?.id).eq('status', 'received').gte('created_at', jan1),
+        isOwnerOrManager
+          ? supabase
+              .from('commission_allocations')
+              .select('amount, receipt:insurer_receipts!inner(received_on)')
+              .eq('agency_id', agency?.id)
+              .gte('receipt.received_on', jan1)
+          : supabase
+              .from('commission_transactions')
+              .select('amount:amount_received')
+              .eq('agency_id', agency?.id)
+              .in('status', ['received', 'part_paid'])
+              .gte('expected_date', jan1),
       ]);
       const totalPremiumYtd = (policies ?? []).filter(p => true).reduce((s, p) => s + (Number(p.premium_amount) || 0), 0);
       const activePolicies  = (policies ?? []).filter(p => p.status === 'active').length;
