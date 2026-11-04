@@ -82,6 +82,9 @@ export interface ClientWithAgent extends Client {
   assigned_agent: { id: string; full_name: string } | null;
 }
 
+export type CommissionBasis = 'annual' | 'per_premium';
+export type PremiumFrequency = 'monthly' | 'quarterly' | 'half_yearly' | 'yearly';
+
 export type PolicyStatus = 'active' | 'expired' | 'cancelled' | 'pending';
 
 export interface Policy {
@@ -96,6 +99,10 @@ export interface Policy {
   commission_rate: number;
   commission_expected: number;
   commission_received: number;
+  commission_basis: CommissionBasis;
+  premium_frequency: PremiumFrequency | null;
+  instalment_premium: number | null;
+  renewal_commission_rate: number | null;
   start_date: string;
   expiry_date: string;
   status: PolicyStatus;
@@ -113,17 +120,60 @@ export interface PolicyWithRelations extends Policy {
   agent: Pick<AgencyUser, 'id' | 'full_name'>;
 }
 
-export type CommissionStatus = 'pending' | 'received' | 'overdue';
+export type CommissionStatus = 'pending' | 'part_paid' | 'received';
+export type CommissionSource = 'expected' | 'statement';
 
 export interface CommissionTransaction {
   id: string;
   policy_id: string;
   agency_id: string;
   amount: number;
+  amount_received: number;
+  period?: string | null;
+  source: CommissionSource;
   expected_date?: string | null;
   received_date?: string | null;
   status: CommissionStatus;
   notes?: string | null;
+  created_at: string;
+}
+
+export interface InsurerReceipt {
+  id: string;
+  agency_id: string;
+  insurer_id: string;
+  received_on: string;
+  amount: number;
+  bank_reference: string | null;
+  file_path: string | null;
+  notes: string | null;
+  is_opening_balance: boolean;
+  created_by: string | null;
+  created_at: string;
+}
+
+export interface StatementLine {
+  id: string;
+  agency_id: string;
+  receipt_id: string;
+  line_no: number;
+  policy_number: string | null;
+  client_name: string | null;
+  premium: number | null;
+  commission: number;
+  period: string | null;
+  policy_id: string | null;
+  created_at: string;
+}
+
+export interface CommissionAllocation {
+  id: string;
+  agency_id: string;
+  receipt_id: string;
+  commission_id: string;
+  statement_line_id: string | null;
+  amount: number;
+  created_by: string | null;
   created_at: string;
 }
 
