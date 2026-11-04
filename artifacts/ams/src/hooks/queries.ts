@@ -328,11 +328,9 @@ export function useCreatePolicy() {
   const { agency } = useAuth();
   
   return useMutation({
-    mutationFn: async (policy: Omit<Policy, 'id' | 'agency_id' | 'created_at' | 'updated_at' | 'commission_expected' | 'commission_received'>) => {
+    mutationFn: async (policy: Omit<Policy, 'id' | 'agency_id' | 'created_at' | 'updated_at' | 'commission_expected' | 'commission_received' | 'commission_basis' | 'premium_frequency' | 'instalment_premium' | 'renewal_commission_rate'> & Partial<Pick<Policy, 'commission_basis' | 'premium_frequency' | 'instalment_premium' | 'renewal_commission_rate'>>) => {
       if (!agency?.id) throw new Error('No agency');
       
-      const expected = (policy.premium_amount * policy.commission_rate) / 100;
-
       // commission_expected is a generated column in Postgres; never send it.
       const { data, error } = await supabase
         .from('policies')
@@ -346,16 +344,7 @@ export function useCreatePolicy() {
         
       if (error) throw error;
       
-      // Auto-create initial commission transaction for expected amount
-      await supabase.from('commission_transactions').insert({
-        agency_id: agency.id,
-        policy_id: data.id,
-        amount: expected,
-        expected_date: data.start_date, // Or derived based on standard rules
-        status: 'pending',
-        notes: 'Initial expected commission'
-      });
-      
+      // The expected commission is created by a database trigger on policy insert.
       return data as Policy;
     },
     onSuccess: () => {
@@ -429,15 +418,16 @@ export function useCommissions(filters?: { status?: string }) {
         .from('commission_transactions')
         .select(`
           *,
-          policy:policies(id, policy_number, agent_id, client:clients(id, name), insurer:insurers(id, name))
+          policy:policies(id, policy_number, agent_id, client:clients(id, name), insurer:insurers(id, name)),
+          allocations:commission_allocations(id, amount, receipt:insurer_receipts(id, received_on))
         `)
         .eq('agency_id', agency?.id);
         
       if (filters?.status && filters.status !== 'all') {
         if (filters.status === 'overdue') {
-          // Overdue logic: pending and expected_date < today
+          // Overdue: unpaid or part-paid with expected_date in the past
           const today = new Date().toISOString().split('T')[0];
-          query = query.eq('status', 'pending').lt('expected_date', today);
+          query = query.in('status', ['pending', 'part_paid']).lt('expected_date', today);
         } else {
           query = query.eq('status', filters.status);
         }
@@ -448,39 +438,6 @@ export function useCommissions(filters?: { status?: string }) {
       return data;
     },
     enabled: !!session && !!agency?.id,
-  });
-}
-
-export function useUpdateCommission() {
-  const queryClient = useQueryClient();
-  
-  return useMutation({
-    mutationFn: async ({ id, ...transaction }: Partial<CommissionTransaction> & { id: string }) => {
-      const { data, error } = await supabase
-        .from('commission_transactions')
-        .update(transaction)
-        .eq('id', id)
-        .select()
-        .single();
-      if (error) throw error;
-      
-      // If marked received, update the policy's commission_received tally
-      if (transaction.status === 'received' && transaction.amount && data.policy_id) {
-        // Fetch current policy
-        const { data: policy } = await supabase.from('policies').select('commission_received').eq('id', data.policy_id).single();
-        if (policy) {
-          await supabase.from('policies')
-            .update({ commission_received: (policy.commission_received || 0) + transaction.amount })
-            .eq('id', data.policy_id);
-        }
-      }
-      
-      return data as CommissionTransaction;
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['commissions'] });
-      queryClient.invalidateQueries({ queryKey: ['policies'] });
-    },
   });
 }
 
@@ -512,24 +469,15 @@ export function useCreateCommission() {
   const { agency } = useAuth();
   
   return useMutation({
-    mutationFn: async (transaction: Omit<CommissionTransaction, 'id' | 'agency_id' | 'created_at'>) => {
+    mutationFn: async (transaction: { policy_id: string; amount: number; expected_date: string; notes?: string | null }) => {
       if (!agency?.id) throw new Error('No agency');
+      // Status and amount_received are derived by the database; money in goes through receipts.
       const { data, error } = await supabase
         .from('commission_transactions')
         .insert({ ...transaction, agency_id: agency.id })
         .select()
         .single();
       if (error) throw error;
-      
-      // If received immediately
-      if (transaction.status === 'received' && transaction.amount && transaction.policy_id) {
-        const { data: policy } = await supabase.from('policies').select('commission_received').eq('id', transaction.policy_id).single();
-        if (policy) {
-          await supabase.from('policies')
-            .update({ commission_received: (policy.commission_received || 0) + transaction.amount })
-            .eq('id', transaction.policy_id);
-        }
-      }
       
       return data as CommissionTransaction;
     },
@@ -747,15 +695,26 @@ export function useNewClientsPerMonth() {
 
 /** YTD summary KPIs for the reports header */
 export function useYtdSummary() {
-  const { agency, session } = useAuth();
+  const { agency, session, isOwnerOrManager } = useAuth();
   return useQuery({
-    queryKey: ['chart-ytd-summary', agency?.id],
+    queryKey: ['chart-ytd-summary', agency?.id, isOwnerOrManager],
     queryFn: async () => {
       const jan1 = `${new Date().getFullYear()}-01-01`;
       const [{ data: policies }, { data: clients }, { data: commRx }] = await Promise.all([
         supabase.from('policies').select('premium_amount, commission_expected, commission_received, status').eq('agency_id', agency?.id),
         supabase.from('clients').select('id').eq('agency_id', agency?.id).gte('created_at', jan1),
-        supabase.from('commission_transactions').select('amount').eq('agency_id', agency?.id).eq('status', 'received').gte('created_at', jan1),
+        isOwnerOrManager
+          ? supabase
+              .from('commission_allocations')
+              .select('amount, receipt:insurer_receipts!inner(received_on)')
+              .eq('agency_id', agency?.id)
+              .gte('receipt.received_on', jan1)
+          : supabase
+              .from('commission_transactions')
+              .select('amount:amount_received')
+              .eq('agency_id', agency?.id)
+              .in('status', ['received', 'part_paid'])
+              .gte('expected_date', jan1),
       ]);
       const totalPremiumYtd = (policies ?? []).filter(p => true).reduce((s, p) => s + (Number(p.premium_amount) || 0), 0);
       const activePolicies  = (policies ?? []).filter(p => p.status === 'active').length;
@@ -830,35 +789,6 @@ export function useOverdueRenewals() {
       }));
     },
     enabled: !!session && !!agency?.id,
-  });
-}
-
-// ============================================================================
-// COMMISSIONS — bulk action for Phase 3
-// ============================================================================
-
-/** Mark multiple pending/overdue commissions as received in one operation. */
-export function useBulkMarkCommissionsReceived() {
-  const queryClient = useQueryClient();
-  const { agency } = useAuth();
-  return useMutation({
-    mutationFn: async (ids: string[]) => {
-      if (!ids.length) throw new Error('No ids');
-      if (!agency?.id) throw new Error('No agency');
-      const today = new Date().toISOString().split('T')[0];
-      const { error } = await supabase
-        .from('commission_transactions')
-        .update({ status: 'received', received_date: today })
-        .in('id', ids)
-        .eq('agency_id', agency.id)
-        .in('status', ['pending', 'overdue']);
-      if (error) throw error;
-      return ids;
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['commissions'] });
-      queryClient.invalidateQueries({ queryKey: ['policies'] });
-    },
   });
 }
 

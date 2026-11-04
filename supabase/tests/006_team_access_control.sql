@@ -97,7 +97,8 @@ BEGIN
 
   SELECT count(*) INTO n FROM clients;                 ASSERT n = 2, format('a1 clients: expected 2, got %s', n);
   SELECT count(*) INTO n FROM policies;                ASSERT n = 2, format('a1 policies: expected 2, got %s', n);
-  SELECT count(*) INTO n FROM commission_transactions; ASSERT n = 2, format('a1 commissions: expected 2, got %s', n);
+  -- 4 = per policy, 1 from the expected-commission trigger (migration 009) + 1 fixture row
+  SELECT count(*) INTO n FROM commission_transactions; ASSERT n = 4, format('a1 commissions: expected 4, got %s', n);
   SELECT count(*) INTO n FROM renewal_reminders;
   ASSERT n = expected_a1_reminders, format('a1 reminders: expected %s, got %s', expected_a1_reminders, n);
   SELECT count(*) INTO n FROM reports;                 ASSERT n = 0, format('a1 reports: expected 0, got %s', n);

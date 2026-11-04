@@ -8,6 +8,7 @@ A multi-tenant SaaS platform for Kenyan insurance agencies. Agencies manage clie
 - `pnpm --filter @workspace/ams run dev` — frontend dev server on http://localhost:5173
 - `pnpm --filter @workspace/ams run build` — production build to `artifacts/ams/dist/public`
 - `pnpm run typecheck` — typecheck all packages
+- `npx -y pnpm@10.28.0 --filter @workspace/ams run test` — frontend unit tests
 
 Create `artifacts/ams/.env.local` with:
 
@@ -69,8 +70,8 @@ Demo logins exist for the demo agency: `demo@ams.co.ke` (Owner), `manager@ams.co
 
 ## Database
 
-Supabase project: **ERP Demo** (`frzjhknbocuaduuduxkk`). Migrations 001–008 are applied
-(`006a` is its own file and must be run after 006; `007a` and `008a` were live follow-ups folded into `007` and `008`).
+Supabase project: **ERP Demo** (`frzjhknbocuaduuduxkk`). Migrations 001–012 are applied
+(`006a` is its own file and must be run after 006; `007a` and `008a` were live follow-ups folded into `007` and `008`; `009a`, `010a` and `010b` were live follow-ups folded into `009` and `010`).
 New migrations go in `supabase/migrations/` and should be applied in order.
 
 | Migration | Adds |
@@ -84,10 +85,23 @@ New migrations go in `supabase/migrations/` and should be applied in order.
 | 006a | Guard: only owners/managers can change `policies.commission_received` |
 | 007 | Agency invites and invite RPCs |
 | 008 | Team management RPCs (reassign, change role, remove) |
+| 009 | Reconciliation schema: insurer receipts, statement lines, commission allocations, derived commission status, per-premium commissions |
+| 010 | Reconciliation RPCs: `create_insurer_receipt`, `link_statement_line`, `undo_commission_allocation`, `delete_insurer_receipt` (drops `mark_overdue_commissions`) |
+| 011 | Opening balances for commissions received before the system |
+| 012 | Reconciliation follow-ups: monthly report by receipt date, undo unmatches the line, apply_receipt_allocations |
 
 ### Running the database tests
 
-`supabase/tests/` holds one script per feature (`006_team_access_control.sql`, `007_agency_invites.sql`, `008_team_management.sql`). Paste each file into the Supabase SQL editor, or run it through the Supabase MCP `execute_sql`. Each runs inside a transaction that is always rolled back (nothing is saved) and prints `ALL PASSED`; a failed assertion aborts the batch with the reason.
+`supabase/tests/` holds one script per feature (`006` to `012`: team access, invites, team management, reconciliation schema, reconciliation RPCs, opening balances, reconciliation follow-ups). Paste each file into the Supabase SQL editor, or run it through the Supabase MCP `execute_sql`. Each runs inside a transaction that is always rolled back (nothing is saved) and prints `ALL PASSED`; a failed assertion aborts the batch with the reason.
+
+## Receipts & reconciliation
+
+A **receipt** is one payment from an insurer (date, amount, bank reference, optional statement file). It may carry **statement lines** (policy number, client, premium, commission, period). Lines that match a policy are applied to that policy's outstanding commissions; a lump-sum receipt is allocated to chosen commissions directly. Money that is not allocated stays on the receipt as **unapplied** and can be linked later to an unmatched line, or applied to outstanding commissions from the receipt page ("Apply unapplied money").
+
+- Commission status is derived: `pending` (nothing received), `part-paid`, `received`. **Overdue** is computed from the expected date, not stored.
+- Per-premium (e.g. life) policies get a new statement-sourced commission for each line.
+- Owners and Managers record receipts, link lines and undo allocations or delete receipts. Agents cannot; they see the received amounts on their own commissions.
+- Full design: `docs/superpowers/specs/2026-11-03-statement-reconciliation-design.md`.
 
 ## Deploying (Vercel)
 
@@ -102,6 +116,7 @@ Required env vars: `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`.
 - 🔲 Phase 4: Reporting dashboard with Recharts
 - 🔲 Phase 5: Automated monthly reports (PDF + email/WhatsApp)
 - ✅ Team & access control: Owner / Manager / Agent roles, invites, team management, role-based views
+- ✅ Statement reconciliation: insurer receipts, statement lines, applied/unapplied money, part-paid commissions
 - 🔲 Phase 6: Polish (mobile-first, onboarding flow)
 
 ## Gotchas

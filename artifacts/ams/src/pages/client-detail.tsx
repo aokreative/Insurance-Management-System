@@ -24,6 +24,8 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
+import { commissionFields, refineCommission, withCommissionColumns, commissionDefaults } from '@/lib/policy-form';
+import { PolicyCommissionFields } from '@/components/PolicyCommissionFields';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -38,7 +40,8 @@ const policySchema = z.object({
   expiry_date: z.string().min(1, 'Required'),
   status: z.enum(['active', 'expired', 'cancelled', 'pending']),
   notes: z.string().optional(),
-});
+  ...commissionFields,
+}).superRefine(refineCommission);
 
 export default function ClientDetail() {
   const [, params] = useRoute('/clients/:id');
@@ -76,6 +79,7 @@ export default function ClientDetail() {
       expiry_date: new Date(new Date().setFullYear(new Date().getFullYear() + 1)).toISOString().split('T')[0],
       status: 'active' as const,
       notes: '',
+      ...commissionDefaults,
     },
   });
   
@@ -90,12 +94,12 @@ export default function ClientDetail() {
   if (!client) return <div className="p-8">Client not found</div>;
 
   const onAddPolicy = (values: z.infer<typeof policySchema>) => {
-    createPolicy.mutate({
+    createPolicy.mutate(withCommissionColumns({
       ...values,
       // Agents never choose an agent: policies are always recorded against themselves
       agent_id: isOwnerOrManager ? values.agent_id : (session?.id ?? values.agent_id),
       client_id: clientId,
-    }, {
+    }), {
       onSuccess: () => {
         toast({ title: 'Policy added' });
         setIsAddPolicyOpen(false);
@@ -314,6 +318,8 @@ export default function ClientDetail() {
                         {formatCurrency((form.watch('premium_amount') || 0) * (form.watch('commission_rate') || 0) / 100)}
                       </span>
                     </div>
+
+                    <PolicyCommissionFields form={form} productLines={productLines} />
 
                     <div className="grid grid-cols-2 gap-4">
                       <FormField

@@ -1,6 +1,10 @@
 import React, { useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { useCommissions, useUpdateCommission, useCreateCommission, usePolicies, useBulkMarkCommissionsReceived } from '@/hooks/queries';
+import { useCommissions, useCreateCommission, usePolicies } from '@/hooks/queries';
+import { useCreateReceipt } from '@/hooks/receipts';
+import { toCents, fromCents } from '@/lib/reconcile';
+import { Link } from 'wouter';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -22,7 +26,6 @@ import { exportToCsv } from '@/lib/csv-export';
 const commissionSchema = z.object({
   policy_id: z.string().min(1, 'Required'),
   amount: z.coerce.number().min(1, 'Must be positive'),
-  status: z.enum(['pending', 'received']),
   expected_date: z.string().min(1, 'Required'),
   notes: z.string().optional()
 });
@@ -32,8 +35,11 @@ type CommissionFormValues = z.infer<typeof commissionSchema>;
 export default function Commissions() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [searchTerm, setSearchTerm] = useState('');
-  const [receivingId, setReceivingId] = useState<string | null>(null);
-  const [receiveAmount, setReceiveAmount] = useState('');
+  const [payingComm, setPayingComm] = useState<any | null>(null);
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [payDate, setPayDate] = useState(new Date().toISOString().split('T')[0]);
+  const [payAmount, setPayAmount] = useState('');
+  const [payRef, setPayRef] = useState('');
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   
@@ -42,9 +48,8 @@ export default function Commissions() {
 
   const { data: commissions, isLoading } = useCommissions({ status: statusFilter });
   const { data: policies } = usePolicies();
-  const updateCommission = useUpdateCommission();
   const createCommission = useCreateCommission();
-  const bulkMarkReceived = useBulkMarkCommissionsReceived();
+  const createReceipt = useCreateReceipt();
   const { toast } = useToast();
 
   const form = useForm<CommissionFormValues>({
@@ -52,7 +57,6 @@ export default function Commissions() {
     defaultValues: {
       policy_id: '',
       amount: 0,
-      status: 'pending',
       expected_date: new Date().toISOString().split('T')[0],
       notes: ''
     }
@@ -64,12 +68,19 @@ export default function Commissions() {
     c.policy?.insurer?.name?.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  const totalExpected = commissions?.reduce((sum, c) => sum + (c.amount || 0), 0) || 0;
-  const totalReceived = commissions?.filter(c => c.status === 'received').reduce((sum, c) => sum + (c.amount || 0), 0) || 0;
-  
+  const remainingCentsOf = (c: any) => Math.max((toCents(Number(c.amount) || 0) ?? 0) - (toCents(Number(c.amount_received) || 0) ?? 0), 0);
+  const remainingOf = (c: any) => fromCents(remainingCentsOf(c));
   const today = new Date().toISOString().split('T')[0];
-  const totalOverdue = commissions?.filter(c => c.status === 'pending' && c.expected_date && c.expected_date < today)
-    .reduce((sum, c) => sum + (c.amount || 0), 0) || 0;
+  const isUnpaid = (c: any) => c.status === 'pending' || c.status === 'part_paid';
+  const isOverdueRow = (c: any) => isUnpaid(c) && !!c.expected_date && c.expected_date < today;
+  const lastReceivedOn = (c: any): string | null => {
+    const dates = ((c.allocations ?? []) as any[]).map(a => a.receipt?.received_on).filter(Boolean) as string[];
+    return dates.length ? dates.reduce((m, d) => (d > m ? d : m)) : null;
+  };
+
+  const totalExpected = commissions?.reduce((sum, c) => sum + (c.amount || 0), 0) || 0;
+  const totalReceived = commissions?.reduce((sum, c) => sum + (Number(c.amount_received) || 0), 0) || 0;
+  const totalOverdue = commissions?.filter(isOverdueRow).reduce((sum, c) => sum + remainingOf(c), 0) || 0;
 
   const collectionRate = totalExpected > 0 ? (totalReceived / totalExpected) * 100 : 0;
   let rateColor = 'text-muted-foreground';
@@ -92,7 +103,7 @@ export default function Commissions() {
   }
 
   const nowMs = new Date().getTime();
-  const overdueItems = commissions?.filter(c => c.status === 'pending' && c.expected_date && c.expected_date < today) || [];
+  const overdueItems = commissions?.filter(isOverdueRow) || [];
   
   const aging = {
     '0-30': { label: '0–30 Days', count: 0, amount: 0 },
@@ -103,25 +114,47 @@ export default function Commissions() {
 
   overdueItems.forEach(c => {
     const days = Math.floor((nowMs - new Date(c.expected_date).getTime()) / (1000 * 3600 * 24));
-    if (days <= 30) { aging['0-30'].count++; aging['0-30'].amount += c.amount || 0; }
-    else if (days <= 60) { aging['31-60'].count++; aging['31-60'].amount += c.amount || 0; }
-    else if (days <= 90) { aging['61-90'].count++; aging['61-90'].amount += c.amount || 0; }
-    else { aging['90+'].count++; aging['90+'].amount += c.amount || 0; }
+    if (days <= 30) { aging['0-30'].count++; aging['0-30'].amount += remainingOf(c); }
+    else if (days <= 60) { aging['31-60'].count++; aging['31-60'].amount += remainingOf(c); }
+    else if (days <= 90) { aging['61-90'].count++; aging['61-90'].amount += remainingOf(c); }
+    else { aging['90+'].count++; aging['90+'].amount += remainingOf(c); }
   });
 
-  const handleBulkMarkReceived = () => {
-    if (selectedIds.size === 0) return;
-    bulkMarkReceived.mutate(Array.from(selectedIds), {
+  const selectedComms = (commissions ?? []).filter(c => selectedIds.has(c.id) && remainingOf(c) > 0);
+  const selectedInsurerIds = new Set(selectedComms.map(c => c.policy?.insurer?.id));
+  const sameInsurer = selectedComms.length > 0 && selectedInsurerIds.size === 1;
+  const selectedTotal = fromCents(selectedComms.reduce((sum, c) => sum + remainingCentsOf(c), 0));
+
+  const showError = (err: Error) => toast({ title: 'Error', description: err.message, variant: 'destructive' });
+
+  const openBulkDialog = () => {
+    setPayDate(today);
+    setPayRef('');
+    setBulkOpen(true);
+  };
+
+  const handleBulkRecord = () => {
+    const insurerId = selectedComms[0]?.policy?.insurer?.id;
+    if (!insurerId || !sameInsurer) return;
+    createReceipt.mutate({
+      insurerId,
+      receivedOn: payDate,
+      amount: selectedTotal,
+      bankReference: payRef.trim() || null,
+      allocations: selectedComms.map(c => ({ commission_id: c.id, amount: remainingOf(c) })),
+    }, {
       onSuccess: () => {
-        toast({ title: 'Commissions marked as received' });
+        toast({ title: 'Payment recorded' });
+        setBulkOpen(false);
         setSelectedIds(new Set());
-      }
+      },
+      onError: showError,
     });
   };
 
   const toggleSelectAll = () => {
     if (!filteredCommissions) return;
-    const selectable = filteredCommissions.filter(c => c.status === 'pending');
+    const selectable = filteredCommissions.filter(c => remainingOf(c) > 0);
     if (selectedIds.size === selectable.length && selectable.length > 0) {
       setSelectedIds(new Set());
     } else {
@@ -137,31 +170,39 @@ export default function Commissions() {
   };
 
   const handleReceive = () => {
-    if (!receivingId || !receiveAmount) return;
-    
-    updateCommission.mutate({
-      id: receivingId,
-      status: 'received',
-      received_date: new Date().toISOString().split('T')[0],
-      amount: parseFloat(receiveAmount)
+    const cents = toCents(payAmount);
+    const insurerId = payingComm?.policy?.insurer?.id;
+    if (!payingComm || !insurerId || cents === null || cents <= 0) return;
+    if (cents > remainingCentsOf(payingComm)) {
+      toast({ title: 'Error', description: `Amount exceeds the remaining KES ${remainingOf(payingComm).toLocaleString('en-KE')}`, variant: 'destructive' });
+      return;
+    }
+    const amount = fromCents(cents);
+    createReceipt.mutate({
+      insurerId,
+      receivedOn: payDate,
+      amount,
+      bankReference: payRef.trim() || null,
+      allocations: [{ commission_id: payingComm.id, amount }],
     }, {
       onSuccess: () => {
-        toast({ title: 'Commission marked as received' });
-        setReceivingId(null);
-        setReceiveAmount('');
-      }
+        toast({ title: 'Payment recorded' });
+        setPayingComm(null);
+      },
+      onError: showError,
     });
   };
 
   const openReceiveDialog = (comm: any) => {
-    setReceivingId(comm.id);
-    setReceiveAmount(comm.amount.toString());
+    setPayingComm(comm);
+    setPayDate(today);
+    setPayAmount(remainingOf(comm).toString());
+    setPayRef('');
   };
 
   const onSubmitAdd = (values: CommissionFormValues) => {
     createCommission.mutate({
-      ...values,
-      received_date: values.status === 'received' ? new Date().toISOString().split('T')[0] : null
+      ...values
     }, {
       onSuccess: () => {
         toast({ title: 'Commission transaction added' });
@@ -183,7 +224,8 @@ export default function Commissions() {
       amount: c.amount,
       status: c.status,
       expected_date: c.expected_date,
-      received_date: c.received_date || ''
+      received_amount: c.amount_received,
+      received_date: lastReceivedOn(c) || ''
     }));
     exportToCsv('commissions', exportData);
   };
@@ -237,23 +279,6 @@ export default function Commissions() {
                       <FormItem>
                         <FormLabel>Amount (KES)</FormLabel>
                         <FormControl><Input type="number" {...field} /></FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                  <FormField
-                    control={form.control}
-                    name="status"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Status</FormLabel>
-                        <Select onValueChange={field.onChange} value={field.value}>
-                          <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
-                          <SelectContent>
-                            <SelectItem value="pending">Pending</SelectItem>
-                            <SelectItem value="received">Received</SelectItem>
-                          </SelectContent>
-                        </Select>
                         <FormMessage />
                       </FormItem>
                     )}
@@ -341,9 +366,16 @@ export default function Commissions() {
         <div className="sticky top-4 z-10 flex items-center justify-between bg-primary text-primary-foreground px-4 py-3 rounded-md shadow-md">
           <div className="text-sm font-medium">{selectedIds.size} selected</div>
           <div className="space-x-2">
-            <Button size="sm" variant="secondary" onClick={handleBulkMarkReceived} disabled={bulkMarkReceived.isPending}>
-              {bulkMarkReceived.isPending ? "Marking..." : "Mark All Received"}
-            </Button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span>
+                  <Button size="sm" variant="secondary" onClick={openBulkDialog} disabled={!sameInsurer}>
+                    Record payment for selected
+                  </Button>
+                </span>
+              </TooltipTrigger>
+              {!sameInsurer && <TooltipContent>Select commissions from one insurer</TooltipContent>}
+            </Tooltip>
             <Button size="sm" variant="ghost" className="text-primary-foreground hover:bg-primary-foreground/20 hover:text-primary-foreground" onClick={() => setSelectedIds(new Set())}>
               Clear
             </Button>
@@ -373,6 +405,7 @@ export default function Commissions() {
             <SelectContent>
               <SelectItem value="all">All Statuses</SelectItem>
               <SelectItem value="pending">Pending</SelectItem>
+              <SelectItem value="part_paid">Part-paid</SelectItem>
               <SelectItem value="received">Received</SelectItem>
               <SelectItem value="overdue">Overdue</SelectItem>
             </SelectContent>
@@ -387,7 +420,7 @@ export default function Commissions() {
               {!isAgent && (
                 <TableHead className="w-12 text-center">
                   <Checkbox 
-                    checked={filteredCommissions && filteredCommissions.filter(c => c.status === 'pending').length > 0 && selectedIds.size === filteredCommissions.filter(c => c.status === 'pending').length}
+                    checked={!!filteredCommissions && filteredCommissions.filter(c => remainingOf(c) > 0).length > 0 && selectedIds.size === filteredCommissions.filter(c => remainingOf(c) > 0).length}
                     onCheckedChange={toggleSelectAll}
                   />
                 </TableHead>
@@ -407,16 +440,17 @@ export default function Commissions() {
               <TableRow><TableCell colSpan={isAgent ? 5 : 7} className="text-center py-8 text-muted-foreground">No commission records found.</TableCell></TableRow>
             ) : (
               filteredCommissions?.map((comm) => {
-                const isOverdue = comm.status === 'pending' && comm.expected_date && comm.expected_date < today;
-                const displayStatus = isOverdue ? 'overdue' : comm.status;
+                const isOverdue = isOverdueRow(comm);
+                const receivedOn = lastReceivedOn(comm);
+                const remaining = remainingOf(comm);
                 
                 return (
                   <TableRow key={comm.id}>
                     {!isAgent && (
                       <TableCell className="text-center">
                         <Checkbox 
-                          checked={comm.status === 'received' ? true : selectedIds.has(comm.id)}
-                          disabled={comm.status === 'received'}
+                          checked={remaining <= 0 ? true : selectedIds.has(comm.id)}
+                          disabled={remaining <= 0}
                           onCheckedChange={() => toggleSelectRow(comm.id)}
                         />
                       </TableCell>
@@ -433,18 +467,37 @@ export default function Commissions() {
                     </TableCell>
                     <TableCell>
                       <div className="text-sm">Expected: {formatDate(comm.expected_date)}</div>
-                      {comm.received_date && <div className="text-xs text-emerald-600">Received: {formatDate(comm.received_date)}</div>}
+                      {receivedOn && <div className="text-xs text-emerald-600">Received: {formatDate(receivedOn)}</div>}
                     </TableCell>
                     <TableCell>
-                      <Badge variant={getStatusColor(displayStatus)} className="capitalize">
-                        {displayStatus}
-                      </Badge>
+                      <div className="flex flex-wrap items-center gap-1">
+                        {comm.status === 'part_paid' ? (
+                          <Badge variant="warning">Part-paid</Badge>
+                        ) : (
+                          <Badge variant={getStatusColor(comm.status)} className="capitalize">{comm.status}</Badge>
+                        )}
+                        {isOverdue && <Badge variant="destructive">Overdue</Badge>}
+                      </div>
+                      {comm.status === 'part_paid' && (
+                        <div className="text-xs text-muted-foreground mt-1">
+                          {formatCurrency(comm.amount_received)} / {formatCurrency(comm.amount)}
+                        </div>
+                      )}
+                      {!isAgent && ((comm.allocations ?? []) as any[]).length > 0 && (
+                        <div className="text-xs mt-1 space-x-2">
+                          {Array.from(new Map(((comm.allocations ?? []) as any[]).filter(a => a.receipt?.id).map(a => [a.receipt.id, a.receipt])).values()).map((r: any) => (
+                            <Link key={r.id} href={`/receipts/${r.id}`} className="text-primary underline">
+                              Receipt {formatDate(r.received_on)}
+                            </Link>
+                          ))}
+                        </div>
+                      )}
                     </TableCell>
                     {!isAgent && (
                       <TableCell className="text-right">
-                        {comm.status === 'pending' && (
+                        {remaining > 0 && (
                           <Button size="sm" variant="outline" onClick={() => openReceiveDialog(comm)}>
-                            <CheckCircle2 className="w-4 h-4 mr-2" /> Mark Received
+                            <CheckCircle2 className="w-4 h-4 mr-2" /> Record payment
                           </Button>
                         )}
                       </TableCell>
@@ -458,26 +511,61 @@ export default function Commissions() {
       </div>
 
       {!isAgent && (
-      <Dialog open={!!receivingId} onOpenChange={(open) => !open && setReceivingId(null)}>
+      <Dialog open={!!payingComm} onOpenChange={(open) => !open && setPayingComm(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Mark Commission Received</DialogTitle>
-            <DialogDescription>Confirm the amount received from the insurer.</DialogDescription>
+            <DialogTitle>Record payment</DialogTitle>
+            <DialogDescription>
+              {payingComm?.policy?.policy_number} - {payingComm?.policy?.insurer?.name}. Remaining {payingComm ? formatCurrency(remainingOf(payingComm)) : ''}.
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
             <div className="space-y-2">
-              <label className="text-sm font-medium">Amount Received (KES)</label>
-              <Input 
-                type="number" 
-                value={receiveAmount} 
-                onChange={(e) => setReceiveAmount(e.target.value)} 
-              />
+              <label className="text-sm font-medium">Date received</label>
+              <Input type="date" value={payDate} onChange={(e) => setPayDate(e.target.value)} />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Amount received (KES)</label>
+              <Input type="number" value={payAmount} onChange={(e) => setPayAmount(e.target.value)} />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Bank reference (optional)</label>
+              <Input value={payRef} onChange={(e) => setPayRef(e.target.value)} />
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setReceivingId(null)}>Cancel</Button>
-            <Button onClick={handleReceive} disabled={updateCommission.isPending || !receiveAmount}>
-              {updateCommission.isPending ? "Saving..." : "Confirm Receipt"}
+            <Button variant="outline" onClick={() => setPayingComm(null)}>Cancel</Button>
+            <Button onClick={handleReceive} disabled={createReceipt.isPending || !((toCents(payAmount) ?? 0) > 0) || !payDate}>
+              {createReceipt.isPending ? "Saving..." : "Record payment"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      )}
+
+      {!isAgent && (
+      <Dialog open={bulkOpen} onOpenChange={setBulkOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Record payment for selected</DialogTitle>
+            <DialogDescription>
+              {selectedComms.length} commission{selectedComms.length === 1 ? '' : 's'}, {formatCurrency(selectedTotal)} in total (each paid in full).
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Date received</label>
+              <Input type="date" value={payDate} onChange={(e) => setPayDate(e.target.value)} />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Bank reference (optional)</label>
+              <Input value={payRef} onChange={(e) => setPayRef(e.target.value)} />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setBulkOpen(false)}>Cancel</Button>
+            <Button onClick={handleBulkRecord} disabled={createReceipt.isPending || !sameInsurer || !payDate}>
+              {createReceipt.isPending ? "Saving..." : "Record payment"}
             </Button>
           </DialogFooter>
         </DialogContent>

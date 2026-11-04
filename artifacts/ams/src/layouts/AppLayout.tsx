@@ -12,7 +12,8 @@ import {
   Settings,
   LogOut,
   Menu,
-  BarChart2
+  BarChart2,
+  Receipt
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useQuery } from '@tanstack/react-query';
@@ -57,6 +58,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
     { name: 'Clients', path: '/clients', icon: Users },
     { name: 'Policies', path: '/policies', icon: FileText },
     { name: 'Commissions', path: '/commissions', icon: DollarSign },
+    ...(isOwnerOrManager ? [{ name: 'Receipts', path: '/receipts', icon: Receipt }] : []),
     { 
       name: 'Renewals', 
       path: '/renewals', 

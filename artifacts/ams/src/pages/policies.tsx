@@ -13,6 +13,8 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
+import { commissionFields, refineCommission, withCommissionColumns, commissionDefaults } from '@/lib/policy-form';
+import { PolicyCommissionFields } from '@/components/PolicyCommissionFields';
 import { useAgencyMembers } from '@/hooks/team';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
@@ -32,7 +34,8 @@ const policySchema = z.object({
   expiry_date: z.string().min(1, 'Required'),
   status: z.enum(['active', 'expired', 'cancelled', 'pending']),
   notes: z.string().optional(),
-});
+  ...commissionFields,
+}).superRefine(refineCommission);
 
 export default function Policies() {
   const [searchTerm, setSearchTerm] = useState('');
@@ -71,6 +74,7 @@ export default function Policies() {
       expiry_date: new Date(new Date().setFullYear(new Date().getFullYear() + 1)).toISOString().split('T')[0],
       status: 'active' as const,
       notes: '',
+      ...commissionDefaults,
     },
   });
 
@@ -81,7 +85,7 @@ export default function Policies() {
 
   const onSubmit = (values: z.infer<typeof policySchema>) => {
     // Agents never choose an agent: policies are always recorded against themselves
-    createPolicy.mutate(isOwnerOrManager ? values : { ...values, agent_id: session?.id ?? values.agent_id }, {
+    createPolicy.mutate(withCommissionColumns(isOwnerOrManager ? values : { ...values, agent_id: session?.id ?? values.agent_id }), {
       onSuccess: () => {
         toast({ title: 'Policy created' });
         setIsAddOpen(false);
@@ -250,6 +254,8 @@ export default function Policies() {
                   />
                 </div>
                 
+                <PolicyCommissionFields form={form} productLines={productLines} />
+
                 <div className="grid grid-cols-2 gap-4">
                   <FormField
                     control={form.control}
