@@ -14,6 +14,9 @@ import * as z from 'zod';
 import { useToast } from '@/hooks/use-toast';
 import { Switch } from '@/components/ui/switch';
 import { exportToCsv } from '@/lib/csv-export';
+import { useInsurerMoneySummary } from '@/hooks/receipts';
+import { useAuth } from '@/contexts/AuthContext';
+import { formatCurrency } from '@/lib/utils';
 
 const insurerSchema = z.object({
   name: z.string().min(2, 'Name is required'),
@@ -36,6 +39,10 @@ export default function Insurers() {
   const updateInsurer = useUpdateInsurer();
   const deleteInsurer = useDeleteInsurer();
   const { toast } = useToast();
+  const { isOwnerOrManager } = useAuth();
+  const { data: money } = useInsurerMoneySummary();
+  const moneyFor = (id: string) => money?.find(m => m.insurerId === id);
+  const colCount = isOwnerOrManager ? 8 : 5;
 
   const form = useForm<InsurerFormValues>({
     resolver: zodResolver(insurerSchema),
@@ -234,14 +241,21 @@ export default function Insurers() {
               <TableHead>Contact Email</TableHead>
               <TableHead>Phone</TableHead>
               <TableHead>Status</TableHead>
+              {isOwnerOrManager && (
+                <>
+                  <TableHead className="text-right">Outstanding</TableHead>
+                  <TableHead className="text-right">Overdue</TableHead>
+                  <TableHead className="text-right">Unapplied</TableHead>
+                </>
+              )}
               <TableHead className="text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {isLoading ? (
-              <TableRow><TableCell colSpan={5} className="text-center py-8">Loading...</TableCell></TableRow>
+              <TableRow><TableCell colSpan={colCount} className="text-center py-8">Loading...</TableCell></TableRow>
             ) : filteredInsurers?.length === 0 ? (
-              <TableRow><TableCell colSpan={5} className="text-center py-8 text-muted-foreground">No insurers found.</TableCell></TableRow>
+              <TableRow><TableCell colSpan={colCount} className="text-center py-8 text-muted-foreground">No insurers found.</TableCell></TableRow>
             ) : (
               filteredInsurers?.map((insurer) => (
                 <TableRow key={insurer.id} className={!insurer.is_active ? "opacity-60 bg-muted/30" : ""}>
@@ -258,6 +272,13 @@ export default function Insurers() {
                       <Badge variant="secondary" className="gap-1"><ShieldBan className="w-3 h-3" /> Inactive</Badge>
                     )}
                   </TableCell>
+                  {isOwnerOrManager && (
+                    <>
+                      <TableCell className="text-right">{formatCurrency(moneyFor(insurer.id)?.outstanding ?? 0)}</TableCell>
+                      <TableCell className={`text-right ${(moneyFor(insurer.id)?.overdue ?? 0) > 0 ? 'text-destructive' : ''}`}>{formatCurrency(moneyFor(insurer.id)?.overdue ?? 0)}</TableCell>
+                      <TableCell className="text-right">{formatCurrency(moneyFor(insurer.id)?.unapplied ?? 0)}</TableCell>
+                    </>
+                  )}
                   <TableCell className="text-right">
                     <Button variant="ghost" size="icon" onClick={() => openEdit(insurer)}>
                       <Edit className="h-4 w-4" />

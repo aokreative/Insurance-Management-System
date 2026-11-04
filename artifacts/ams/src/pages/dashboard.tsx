@@ -9,6 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { startOfMonth, endOfMonth, addDays, startOfDay } from 'date-fns';
 import { OnboardingChecklist } from '@/components/OnboardingChecklist';
+import { projectedMonthlyCommission } from '@/lib/projection';
 
 export default function Dashboard() {
   const { agency, session, profile, isOwnerOrManager } = useAuth();
@@ -98,6 +99,14 @@ export default function Dashboard() {
         .order('expiry_date', { ascending: true })
         .limit(5);
 
+      // 7b. Active per-premium (life) policies for the monthly projection
+      const { data: perPremiumPolicies } = await supabase
+        .from('policies')
+        .select('instalment_premium, premium_frequency, commission_rate, renewal_commission_rate, start_date')
+        .eq('agency_id', agency.id)
+        .eq('status', 'active')
+        .eq('commission_basis', 'per_premium');
+
       // 8. Onboarding counts
       const [{ count: insurerCount }, { count: clientCount }] = await Promise.all([
         supabase.from('insurers').select('*', { count: 'exact', head: true }).eq('agency_id', agency.id),
@@ -111,6 +120,8 @@ export default function Dashboard() {
         expectedThisMonth,
         receivedThisMonth,
         overdueCount: overdueCount || 0,
+        perPremiumCount: perPremiumPolicies?.length || 0,
+        projectedMonthly: projectedMonthlyCommission((perPremiumPolicies ?? []) as any),
         recentPolicies: recentPolicies || [],
         upcomingRenewals: upcomingRenewals || [],
         // onboarding
@@ -174,6 +185,15 @@ export default function Dashboard() {
           icon={DollarSign}
           loading={isLoading}
         />
+        {(metrics?.perPremiumCount ?? 0) > 0 && (
+          <StatCard
+            title={my("Projected monthly (life)", "My projected monthly (life)")}
+            value={formatCurrency(metrics?.projectedMonthly)}
+            subtitle="From active per-premium policies"
+            icon={DollarSign}
+            loading={isLoading}
+          />
+        )}
         <StatCard
           title={my("Overdue Commissions", "My Overdue Commissions")}
           value={metrics?.overdueCount || 0}
