@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useLocation } from 'wouter';
 import { useAuth } from '@/contexts/AuthContext';
 import { useInsurers } from '@/hooks/queries';
@@ -43,12 +43,12 @@ export default function ReceiptNew() {
   const [pdf, setPdf] = useState<File | null>(null);
   const [pdfError, setPdfError] = useState('');
   const [rows, setRows] = useState<GridRow[]>([emptyRow()]);
-  const [overrides, setOverrides] = useState<Record<number, string>>({});
+  const [overrides, setOverrides] = useState<Record<string, string>>({});
   const [allocState, setAllocState] = useState<AllocationState>({});
   const [submitting, setSubmitting] = useState(false);
 
   const { data: insurers } = useInsurers();
-  const { data: receivables, isLoading: receivablesLoading } = useInsurerReceivables(insurerId || undefined);
+  const { data: receivables, isLoading: receivablesLoading, isError: receivablesError } = useInsurerReceivables(insurerId || undefined);
   const createReceipt = useCreateReceipt();
   const uploadPdf = useUploadReceiptPdf();
 
@@ -56,7 +56,7 @@ export default function ReceiptNew() {
   const detailsValid = !!insurerId && !!receivedOn && amountCents !== null && amountCents > 0;
 
   const filledRows = useMemo(
-    () => rows.map((row, key) => ({ row, key })).filter((x) => !rowIsEmpty(x.row)),
+    () => rows.map((row) => ({ row, key: row.id })).filter((x) => !rowIsEmpty(x.row)),
     [rows],
   );
   const hasLines = filledRows.length > 0;
@@ -90,6 +90,16 @@ export default function ReceiptNew() {
   const overCents = amountCents !== null ? appliedCents - amountCents : 0;
   const overApplied = overCents > 0;
 
+  // Drop overrides whose row no longer exists
+  useEffect(() => {
+    const ids = new Set(rows.map((r) => r.id));
+    setOverrides((prev) => {
+      const keys = Object.keys(prev);
+      if (keys.every((k) => ids.has(k))) return prev;
+      return Object.fromEntries(keys.filter((k) => ids.has(k)).map((k) => [k, prev[k]]));
+    });
+  }, [rows]);
+
   if (!isOwnerOrManager) {
     return <div className="text-muted-foreground">Only owners and managers can record receipts.</div>;
   }
@@ -114,7 +124,7 @@ export default function ReceiptNew() {
     setAllocState({});
   };
 
-  const pick = (key: number, policyId: string | null) => {
+  const pick = (key: string, policyId: string | null) => {
     setOverrides((prev) => {
       const next = { ...prev };
       if (policyId) next[key] = policyId;
@@ -250,7 +260,9 @@ export default function ReceiptNew() {
             <div className="text-sm text-muted-foreground">
               {insurerName} — KES {amountCents !== null ? formatKes(amountCents) : '—'} received on {receivedOn}
             </div>
-            {receivablesLoading ? (
+            {receivablesError ? (
+              <div className="text-sm text-destructive">Couldn't load this insurer's policies — try again</div>
+            ) : receivablesLoading ? (
               <div className="text-sm text-muted-foreground">Loading policies...</div>
             ) : hasLines ? (
               <MatchTable rows={matches} policies={policies} overrides={overrides} onPick={pick} />
@@ -266,7 +278,7 @@ export default function ReceiptNew() {
             )}
             <div className="flex justify-between">
               <Button variant="outline" disabled={submitting} onClick={() => setStep(2)}>Back</Button>
-              <Button disabled={!canConfirm || receivablesLoading} onClick={confirm}>
+              <Button disabled={!canConfirm || receivablesLoading || receivablesError} onClick={confirm}>
                 {submitting ? 'Recording...' : 'Confirm'}
               </Button>
             </div>

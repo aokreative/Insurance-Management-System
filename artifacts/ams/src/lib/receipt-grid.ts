@@ -1,7 +1,8 @@
 // Pure helpers for the receipt lines grid. Cell values are strings; money is integer cents.
-import { toCents, fromCents, type DraftLine } from './reconcile';
+import { toCents, type DraftLine } from './reconcile';
 
 export type GridRow = {
+  id: string;
   policyNumber: string;
   clientName: string;
   premium: string;
@@ -9,7 +10,10 @@ export type GridRow = {
   period: string;
 };
 
-export const emptyRow = (): GridRow => ({ policyNumber: '', clientName: '', premium: '', commission: '', period: '' });
+export const newRowId = (): string =>
+  typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `r${Date.now()}${Math.random()}`;
+
+export const emptyRow = (): GridRow => ({ id: newRowId(), policyNumber: '', clientName: '', premium: '', commission: '', period: '' });
 
 export function rowIsEmpty(r: GridRow): boolean {
   return !r.policyNumber.trim() && !r.clientName.trim() && !r.premium.trim() && !r.commission.trim() && !r.period.trim();
@@ -39,15 +43,16 @@ export function normalisePeriodText(raw: string): string | null {
   return null;
 }
 
-export function rowErrors(r: GridRow): { amount: boolean; date: boolean } {
-  if (rowIsEmpty(r)) return { amount: false, date: false };
+export function rowErrors(r: GridRow): { amount: boolean; premium: boolean; date: boolean } {
+  if (rowIsEmpty(r)) return { amount: false, premium: false, date: false };
   const amount = toCents(r.commission) === null;
+  const premium = r.premium.trim() !== '' && toCents(r.premium) === null;
   let date = false;
   if (r.period.trim()) {
     const iso = normalisePeriodText(r.period);
     date = iso === null || !isRealCalendarDate(iso);
   }
-  return { amount, date };
+  return { amount, premium, date };
 }
 
 export function rowToDraft(r: GridRow): DraftLine {
@@ -61,20 +66,33 @@ export function rowToDraft(r: GridRow): DraftLine {
   };
 }
 
-export function draftToRow(l: DraftLine): GridRow {
-  return {
-    policyNumber: l.policyNumber,
-    clientName: l.clientName,
-    premium: l.premiumCents === null ? '' : String(fromCents(l.premiumCents)),
-    commission: l.commissionCents === null ? '' : String(fromCents(l.commissionCents)),
-    period: l.period ?? '',
-  };
+/** True when pasted text looks like statement rows (more than one cell or row) rather than a single value. */
+export function isMultiCellPaste(text: string): boolean {
+  const t = text.replace(/[\r\n]+$/, '');
+  return /[\t\r\n]/.test(t) || t.split(',').length === 5;
+}
+
+/** Raw pasted rows: cell text is kept as typed so unparsed values are flagged by validation. */
+export function parsePastedRows(text: string): GridRow[] {
+  return text
+    .replace(/[\r\n]+$/, '')
+    .split(/\r?\n/)
+    .filter((l) => l.trim() !== '')
+    .map((raw) => {
+      let f: string[];
+      if (raw.includes('\t')) f = raw.split('\t');
+      else if (raw.trim().split(/ {2,}/).length > 1) f = raw.trim().split(/ {2,}/);
+      else if (raw.split(',').length === 5) f = raw.split(',');
+      else f = [raw];
+      const c = (i: number) => (f[i] ?? '').trim();
+      return { id: newRowId(), policyNumber: c(0), clientName: c(1), premium: c(2), commission: c(3), period: c(4) };
+    });
 }
 
 export function gridHasErrors(rows: GridRow[]): boolean {
   return rows.some((r) => {
     const e = rowErrors(r);
-    return e.amount || e.date;
+    return e.amount || e.premium || e.date;
   });
 }
 

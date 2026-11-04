@@ -3,8 +3,8 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Trash2 } from 'lucide-react';
-import { parsePastedLines, toCents } from '@/lib/reconcile';
-import { emptyRow, draftToRow, rowErrors, rowIsEmpty, formatKes, type GridRow } from '@/lib/receipt-grid';
+import { toCents } from '@/lib/reconcile';
+import { emptyRow, parsePastedRows, isMultiCellPaste, rowErrors, rowIsEmpty, formatKes, type GridRow } from '@/lib/receipt-grid';
 
 const FIELDS: (keyof GridRow)[] = ['policyNumber', 'clientName', 'premium', 'commission', 'period'];
 const PLACEHOLDERS = ['Policy no.', 'Client', 'Premium', 'Commission', 'YYYY-MM-DD'];
@@ -42,8 +42,8 @@ export function LinesGrid({
 
   const handlePaste = (e: React.ClipboardEvent<HTMLInputElement>, r: number) => {
     const text = e.clipboardData.getData('text');
-    if (!/[\t\r\n]/.test(text) && !(text.split(',').length === 5)) return; // plain single value: let it paste normally
-    const parsed = parsePastedLines(text).map(draftToRow);
+    if (!isMultiCellPaste(text)) return; // plain single value: let it paste normally
+    const parsed = parsePastedRows(text);
     if (parsed.length === 0) return;
     e.preventDefault();
     const next = [...rows];
@@ -87,9 +87,9 @@ export function LinesGrid({
                         value={row[field]}
                         placeholder={PLACEHOLDERS[c]}
                         inputMode={field === 'premium' || field === 'commission' ? 'decimal' : undefined}
-                        aria-invalid={(field === 'commission' && err.amount) || (field === 'period' && err.date) || undefined}
+                        aria-invalid={(field === 'commission' && err.amount) || (field === 'premium' && err.premium) || (field === 'period' && err.date) || undefined}
                         className={
-                          (field === 'commission' && err.amount) || (field === 'period' && err.date)
+                          (field === 'commission' && err.amount) || (field === 'premium' && err.premium) || (field === 'period' && err.date)
                             ? 'border-destructive'
                             : ''
                         }
@@ -102,6 +102,9 @@ export function LinesGrid({
                           }
                         }}
                       />
+                      {field === 'premium' && err.premium && (
+                        <div className="text-xs text-destructive mt-1">Check this amount</div>
+                      )}
                       {field === 'commission' && err.amount && (
                         <div className="text-xs text-destructive mt-1">Check this amount</div>
                       )}

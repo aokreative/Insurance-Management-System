@@ -9,7 +9,7 @@ import { formatKes } from '@/lib/receipt-grid';
 import type { ReceivablePolicy } from '@/hooks/receipts';
 
 export type MatchRow = {
-  key: number; // grid row index
+  key: string; // grid row id
   line: DraftLine;
   policyId: string | null;
   status: MatchStatus;
@@ -69,8 +69,8 @@ export function MatchTable({
 }: {
   rows: MatchRow[];
   policies: ReceivablePolicy[];
-  overrides: Record<number, string>;
-  onPick: (key: number, policyId: string | null) => void;
+  overrides: Record<string, string>;
+  onPick: (key: string, policyId: string | null) => void;
 }) {
   const nameOf = (id: string | null) => policies.find((p) => p.id === id)?.policy_number ?? '';
   return (
