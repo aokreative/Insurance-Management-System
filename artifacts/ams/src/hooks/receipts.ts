@@ -292,6 +292,7 @@ export interface ReceivablePolicy {
   commission_basis: 'annual' | 'per_premium';
   clientName: string;
   outstandingCents: number;
+  start_date: string;
 }
 
 export interface ReceivableCommission {
@@ -312,7 +313,7 @@ export function useInsurerReceivables(insurerId: string | undefined) {
       const { data, error } = await supabase
         .from('policies')
         .select(
-          'id, policy_number, commission_basis, client:clients(name), commissions:commission_transactions(id, amount, amount_received, expected_date, period)',
+          'id, policy_number, commission_basis, start_date, client:clients(name), commissions:commission_transactions(id, amount, amount_received, expected_date, period)',
         )
         .eq('agency_id', agency?.id)
         .eq('insurer_id', insurerId)
@@ -340,6 +341,7 @@ export function useInsurerReceivables(insurerId: string | undefined) {
           id: p.id,
           policy_number: p.policy_number,
           commission_basis: p.commission_basis,
+          start_date: p.start_date,
           clientName: p.client?.name ?? '',
           outstandingCents: p.commission_basis === 'per_premium' ? 0 : outstanding,
         });

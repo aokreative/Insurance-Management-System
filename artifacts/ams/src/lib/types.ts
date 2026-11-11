@@ -13,7 +13,64 @@ export interface Agency {
   phone?: string | null;
   address?: string | null;
   subscription_tier: AgencySubscriptionTier;
+  /** Agents may update renewals of their own policies (Owner toggles). */
+  agents_manage_renewals: boolean;
   created_at: string;
+}
+
+export type RenewalStage = 'to_contact' | 'contacted' | 'quoted' | 'renewed' | 'lost';
+export type RenewalChannel = 'phone' | 'whatsapp' | 'sms' | 'email' | 'in_person';
+export type LostReason = 'price' | 'competitor' | 'no_longer_needed' | 'no_response' | 'other';
+export type RenewalActivityKind = 'contact' | 'quote' | 'renewed' | 'lost' | 'reopened' | 'reset';
+
+/** A row of the renewal_pipeline view. */
+export interface RenewalRow {
+  policy_id: string;
+  agency_id: string;
+  policy_number: string;
+  expiry_date: string;
+  start_date: string;
+  premium_amount: number;
+  policy_status: PolicyStatus;
+  client_id: string;
+  client_name: string | null;
+  client_phone: string | null;
+  client_email: string | null;
+  insurer_id: string;
+  insurer_name: string | null;
+  product_line_id: string;
+  product_line_name: string | null;
+  agent_id: string;
+  agent_name: string | null;
+  days_to_expiry: number;
+  renewal_id: string | null;
+  stage: RenewalStage;
+  quoted_insurer_id: string | null;
+  quoted_insurer_name: string | null;
+  quoted_premium: number | null;
+  lost_reason: LostReason | null;
+  renewed_policy_id: string | null;
+  /** Premium of the new-term policy (renewed only). */
+  renewed_premium: number | null;
+  closed_at: string | null;
+  last_activity_at: string | null;
+}
+
+export interface RenewalActivity {
+  id: string;
+  renewal_id: string;
+  kind: RenewalActivityKind;
+  occurred_on: string;
+  channel: RenewalChannel | null;
+  insurer_id: string | null;
+  premium: number | null;
+  lost_reason: LostReason | null;
+  new_policy_id: string | null;
+  note: string | null;
+  created_by: string | null;
+  created_at: string;
+  insurer: { name: string } | null;
+  author: { full_name: string } | null;
 }
 
 export type UserRole = 'owner' | 'manager' | 'agent';

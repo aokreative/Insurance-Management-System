@@ -123,7 +123,8 @@ SELECT
   r.lost_reason,
   r.renewed_policy_id,
   r.closed_at,
-  r.last_activity_at
+  r.last_activity_at,
+  rp.premium_amount   AS renewed_premium
 FROM policies p
 LEFT JOIN policy_renewals r ON r.policy_id = p.id
 LEFT JOIN clients c        ON c.id = p.client_id
@@ -131,6 +132,7 @@ LEFT JOIN insurers i       ON i.id = p.insurer_id
 LEFT JOIN product_lines pl ON pl.id = p.product_line_id
 LEFT JOIN users u          ON u.id = p.agent_id
 LEFT JOIN insurers qi      ON qi.id = r.quoted_insurer_id
+LEFT JOIN policies rp      ON rp.id = r.renewed_policy_id
 WHERE (p.status = 'active'
        AND p.expiry_date <= (now() AT TIME ZONE 'Africa/Nairobi')::date + 90
        AND COALESCE(r.stage, 'to_contact') NOT IN ('renewed', 'lost'))
