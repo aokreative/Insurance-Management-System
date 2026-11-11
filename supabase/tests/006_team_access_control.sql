@@ -65,7 +65,6 @@ BEGIN
     (c_m,    ag, 'corporate',  'M Client',    m);
 
   -- One active policy per client, owned by the client's agent.
-  -- Expiry 200 days out so the trigger creates 90/60/30-day reminders.
   INSERT INTO policies (id, agency_id, client_id, insurer_id, product_line_id, agent_id,
                         policy_number, premium_amount, commission_rate, start_date, expiry_date, status)
   VALUES
@@ -81,6 +80,11 @@ BEGIN
 
   -- One stored report (agents must not see it)
   INSERT INTO reports (agency_id, month, year, metadata) VALUES (ag, 1, 2026, '{}'::jsonb);
+
+  -- Reminder rows are inserted directly (migration 014 removed the
+  -- auto-schedule trigger); RLS on renewal_reminders is still tested.
+  INSERT INTO renewal_reminders (policy_id, agency_id, reminder_date, channel, sent)
+  SELECT id, agency_id, CURRENT_DATE + 30, 'email', true FROM policies WHERE agency_id = ag;
 
   SELECT count(*) INTO expected_a1_reminders
     FROM renewal_reminders r JOIN policies p ON p.id = r.policy_id
