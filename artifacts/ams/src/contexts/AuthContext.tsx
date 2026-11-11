@@ -3,6 +3,7 @@ import { supabase } from '@/lib/supabase';
 import { queryClient } from '@/lib/queryClient';
 import type { Agency, AgencyUser } from '@/lib/types';
 import { useLocation } from 'wouter';
+import { isPublicAuthPath } from '@/lib/auth';
 
 interface AuthContextType {
   session: { id: string; email: string } | null;
@@ -73,7 +74,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setProfile(p);
           setAgency(a);
           // User authenticated but no agency profile yet — send to registration to create one
-          if (!p && window.location.pathname !== '/register' && window.location.pathname !== '/join') {
+          // (not while setting a new password from a reset link)
+          if (!p && window.location.pathname !== '/register' && window.location.pathname !== '/join' && window.location.pathname !== '/reset-password') {
             setLocation('/register');
           }
         }
@@ -106,6 +108,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (currentSession?.user) {
         setSession({ id: currentSession.user.id, email: currentSession.user.email ?? '' });
 
+        // A password-reset link signs the user in; make sure they land on the
+        // page that lets them choose a new password, wherever the link pointed.
+        if (event === 'PASSWORD_RECOVERY' && window.location.pathname !== '/reset-password') {
+          setLocation('/reset-password');
+        }
+
         // On SIGNED_IN we may not yet have profile (e.g. first login, or token refresh).
         // Fetch it; register.tsx calls refreshProfile() explicitly after setup.
         if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
@@ -129,7 +137,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setProfile(null);
         setAgency(null);
         const path = window.location.pathname;
-        if (path !== '/login' && path !== '/register' && path !== '/join') {
+        if (!isPublicAuthPath(path)) {
           setLocation('/login');
         }
 
