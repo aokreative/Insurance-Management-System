@@ -14,6 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { formatDate } from '@/lib/utils';
 import { InviteMemberDialog } from '@/components/team/InviteMemberDialog';
 import { RemoveMemberDialog } from '@/components/team/RemoveMemberDialog';
+import { AgentRatesDialog } from '@/components/team/AgentRatesDialog';
 import { usePendingInvites, useRevokeInvite, useChangeMemberRole, useClientCountsByAgent } from '@/hooks/team';
 import { useForm } from 'react-hook-form';
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
@@ -29,6 +30,7 @@ export default function Settings() {
   const changeRole = useChangeMemberRole();
   const [inviteOpen, setInviteOpen] = useState(false);
   const [removing, setRemoving] = useState<{ id: string; full_name: string } | null>(null);
+  const [ratesFor, setRatesFor] = useState<{ id: string; full_name: string } | null>(null);
   const activeUsers = users?.filter(u => !u.deactivated_at) ?? [];
   const removedUsers = users?.filter(u => u.deactivated_at) ?? [];
 
@@ -182,12 +184,12 @@ export default function Settings() {
                         <TableHead>Email</TableHead>
                         <TableHead>Role</TableHead>
                         <TableHead className="text-right">Clients</TableHead>
-                        {isOwner && <TableHead className="text-right">Actions</TableHead>}
+                        <TableHead className="text-right">Actions</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {usersLoading ? (
-                        <TableRow><TableCell colSpan={isOwner ? 5 : 4} className="text-center py-4">Loading...</TableCell></TableRow>
+                        <TableRow><TableCell colSpan={5} className="text-center py-4">Loading...</TableCell></TableRow>
                       ) : (
                         activeUsers.map(user => (
                           <TableRow key={user.id}>
@@ -199,10 +201,13 @@ export default function Settings() {
                               </Badge>
                             </TableCell>
                             <TableCell className="text-right">{clientCounts?.[user.id] ?? 0}</TableCell>
-                            {isOwner && (
-                              <TableCell className="text-right">
-                                {user.role !== 'owner' && (
-                                  <div className="flex items-center justify-end gap-2">
+                            <TableCell className="text-right">
+                              <div className="flex items-center justify-end gap-2">
+                                <Button variant="outline" size="sm" onClick={() => setRatesFor({ id: user.id, full_name: user.full_name })}>
+                                  Rates
+                                </Button>
+                                {isOwner && user.role !== 'owner' && (
+                                  <>
                                     <Select
                                       value={user.role}
                                       onValueChange={(role) => changeRole.mutate(
@@ -222,10 +227,10 @@ export default function Settings() {
                                     <Button variant="outline" size="sm" onClick={() => setRemoving({ id: user.id, full_name: user.full_name })}>
                                       Remove
                                     </Button>
-                                  </div>
+                                  </>
                                 )}
-                              </TableCell>
-                            )}
+                              </div>
+                            </TableCell>
                           </TableRow>
                         ))
                       )}
@@ -298,6 +303,7 @@ export default function Settings() {
             </Card>
 
             <InviteMemberDialog open={inviteOpen} onOpenChange={setInviteOpen} />
+            <AgentRatesDialog member={ratesFor} canEdit={isOwner} onOpenChange={(o) => { if (!o) setRatesFor(null); }} />
             <RemoveMemberDialog member={removing} onOpenChange={(o) => { if (!o) setRemoving(null); }} />
           </TabsContent>
         )}

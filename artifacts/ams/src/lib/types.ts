@@ -213,3 +213,53 @@ export interface AuthSession {
   profile: AgencyUser;
   agency: Agency;
 }
+
+// ============================================================
+// Agent rates, earnings and payouts
+// ============================================================
+
+export type PayoutMethod = 'mpesa' | 'bank' | 'cash';
+export type EarningKind = 'commission' | 'reversal' | 'adjustment';
+
+export interface AgentRate {
+  id: string;
+  agency_id: string;
+  user_id: string;
+  product_line_id: string | null;
+  rate: number;
+  updated_by: string | null;
+  updated_at: string;
+}
+
+export interface AgentEarning {
+  id: string;
+  agency_id: string;
+  agent_id: string;
+  kind: EarningKind;
+  policy_id: string | null;
+  commission_id: string | null;
+  policy_number: string | null;
+  client_name: string | null;
+  base_amount: number | null;
+  rate: number | null;
+  amount: number;
+  earned_on: string;
+  note: string | null;
+  payout_id: string | null;
+  created_at: string;
+}
+
+export interface AgentPayout {
+  id: string;
+  agency_id: string;
+  agent_id: string;
+  period_end: string;
+  paid_on: string;
+  method: PayoutMethod;
+  reference: string | null;
+  amount: number;
+  voided_at: string | null;
+  voided_by: string | null;
+  created_by: string | null;
+  created_at: string;
+}

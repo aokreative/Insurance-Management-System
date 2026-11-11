@@ -61,6 +61,7 @@ Three fixed roles, enforced by Postgres RLS and role-checked RPCs. An Agent call
 | Insurers, product lines | Edit | Edit | Read |
 | Team list | All members | All members | Own row only |
 | Agency settings | Edit | Read | Read |
+| Agent rates | Edit | View | Own only |
 | Invite staff | Managers and agents | Agents only | No |
 | Change roles, remove staff | Yes | No | No |
 
@@ -70,7 +71,7 @@ Demo logins exist for the demo agency: `demo@ams.co.ke` (Owner), `manager@ams.co
 
 ## Database
 
-Supabase project: **ERP Demo** (`frzjhknbocuaduuduxkk`). Migrations 001–012 are applied
+Supabase project: **ERP Demo** (`frzjhknbocuaduuduxkk`). Migrations 001–013a are applied
 (`006a` is its own file and must be run after 006; `007a` and `008a` were live follow-ups folded into `007` and `008`; `009a`, `010a` and `010b` were live follow-ups folded into `009` and `010`).
 New migrations go in `supabase/migrations/` and should be applied in order.
 
@@ -89,10 +90,12 @@ New migrations go in `supabase/migrations/` and should be applied in order.
 | 010 | Reconciliation RPCs: `create_insurer_receipt`, `link_statement_line`, `undo_commission_allocation`, `delete_insurer_receipt` (drops `mark_overdue_commissions`) |
 | 011 | Opening balances for commissions received before the system |
 | 012 | Reconciliation follow-ups: monthly report by receipt date, undo unmatches the line, apply_receipt_allocations |
+| 013 | Agent commission & payouts: rates, earnings ledger, payouts |
+| 013a | Payout follow-ups: expected-total guard on create_agent_payout, reversal/adjustment dating (Africa/Nairobi), rates for removed members, remove_member clears rates |
 
 ### Running the database tests
 
-`supabase/tests/` holds one script per feature (`006` to `012`: team access, invites, team management, reconciliation schema, reconciliation RPCs, opening balances, reconciliation follow-ups). Paste each file into the Supabase SQL editor, or run it through the Supabase MCP `execute_sql`. Each runs inside a transaction that is always rolled back (nothing is saved) and prints `ALL PASSED`; a failed assertion aborts the batch with the reason.
+`supabase/tests/` holds one script per feature (`006` to `013a`: team access, invites, team management, reconciliation schema, reconciliation RPCs, opening balances, reconciliation follow-ups, agent payouts, payout follow-ups). Paste each file into the Supabase SQL editor, or run it through the Supabase MCP `execute_sql`. Each runs inside a transaction that is always rolled back (nothing is saved) and prints `ALL PASSED`; a failed assertion aborts the batch with the reason.
 
 ## Receipts & reconciliation
 
@@ -102,6 +105,17 @@ A **receipt** is one payment from an insurer (date, amount, bank reference, opti
 - Per-premium (e.g. life) policies get a new statement-sourced commission for each line.
 - Owners and Managers record receipts, link lines and undo allocations or delete receipts. Agents cannot; they see the received amounts on their own commissions.
 - Full design: `docs/superpowers/specs/2026-11-03-statement-reconciliation-design.md`.
+
+## Agent commission & payouts
+
+Agents earn their rate x the commission actually received from the insurer (not on expected commission).
+
+- Each agent has a default rate plus optional product-line overrides (Owner edits, Manager views). The rate is locked on each earning when it is created, so later rate changes do not alter past earnings.
+- Owners and Managers pay per agent up to a chosen date, by M-Pesa, bank or cash, with a reference.
+- Reversals (e.g. an undone receipt) are deducted from the agent's next payout.
+- Owners can add adjustments and void payouts.
+- Printable statements per payout.
+- Agents see only "My earnings" (their own earnings and payouts).
 
 ## Deploying (Vercel)
 
@@ -117,6 +131,7 @@ Required env vars: `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`.
 - 🔲 Phase 5: Automated monthly reports (PDF + email/WhatsApp)
 - ✅ Team & access control: Owner / Manager / Agent roles, invites, team management, role-based views
 - ✅ Statement reconciliation: insurer receipts, statement lines, applied/unapplied money, part-paid commissions
+- ✅ Agent commission & payouts: agent rates, earnings ledger, payouts, statements, My earnings
 - 🔲 Phase 6: Polish (mobile-first, onboarding flow)
 
 ## Gotchas
