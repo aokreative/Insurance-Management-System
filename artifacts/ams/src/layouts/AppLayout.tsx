@@ -21,7 +21,7 @@ import { Button } from '@/components/ui/button';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { addDays, startOfDay } from 'date-fns';
-import { useAgentRates } from '@/hooks/payouts';
+import { useAgentRates, useHasOwnEarnings } from '@/hooks/payouts';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { 
@@ -56,9 +56,10 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
     enabled: !!agency?.id && !!session,
   });
 
-  // Owner/Manager only see "My earnings" when they have a rate of their own
+  // Owner/Manager only see "My earnings" when they have a rate of their own or any earnings
   const { data: myRates } = useAgentRates(session?.id);
-  const showMyEarnings = !isOwnerOrManager || (myRates?.length ?? 0) > 0;
+  const { data: hasOwnEarnings } = useHasOwnEarnings(isOwnerOrManager ? session?.id : undefined);
+  const showMyEarnings = !isOwnerOrManager || (myRates?.length ?? 0) > 0 || !!hasOwnEarnings;
 
   const navItems = [
     { name: 'Dashboard', path: '/dashboard', icon: LayoutDashboard },

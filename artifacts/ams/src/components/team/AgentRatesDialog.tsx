@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -30,8 +30,13 @@ export function AgentRatesDialog({ member, canEdit, onOpenChange }: Props) {
   const [rows, setRows] = useState<OverrideRow[]>([]);
   const [nextKey, setNextKey] = useState(1);
 
+  // Seed the form once per member (first load), not on every refetch,
+  // so a background refetch never wipes what the owner is typing.
+  const seededFor = useRef<string | null>(null);
   useEffect(() => {
-    if (!member || !rates) return;
+    if (!member) { seededFor.current = null; return; }
+    if (!rates || seededFor.current === member.id) return;
+    seededFor.current = member.id;
     const def = rates.find((r) => r.product_line_id === null);
     setDefaultRate(def ? String(Number(def.rate)) : '');
     const ovs = rates.filter((r) => r.product_line_id !== null);

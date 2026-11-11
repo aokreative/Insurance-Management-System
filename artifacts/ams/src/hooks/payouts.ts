@@ -36,6 +36,24 @@ export interface OwedToAgent {
   lastPaidOn: string | null;
 }
 
+/** Whether the user has any earnings of their own (head-only count). */
+export function useHasOwnEarnings(userId: string | undefined) {
+  const { agency, session } = useAuth();
+  return useQuery({
+    queryKey: ['agent-earnings', agency?.id, 'has-own', userId],
+    queryFn: async () => {
+      const { count, error } = await supabase
+        .from('agent_earnings')
+        .select('id', { count: 'exact', head: true })
+        .eq('agency_id', agency?.id)
+        .eq('agent_id', userId);
+      if (error) throw error;
+      return (count ?? 0) > 0;
+    },
+    enabled: !!session && !!agency?.id && !!userId,
+  });
+}
+
 /** The agency's rates (Owner/Manager) or just the caller's own (Agent), optionally for one member. */
 export function useAgentRates(userId?: string) {
   const { agency, session } = useAuth();
@@ -219,6 +237,8 @@ export function useCreatePayout() {
       paidOn: string;
       method: PayoutMethod | '';
       reference: string;
+      /** The previewed total the user confirmed; the server refuses if what is owed changed. */
+      expectedTotal: number;
     }) => {
       const { data, error } = await supabase.rpc('create_agent_payout', {
         p_user_id: v.agentId,
@@ -226,6 +246,7 @@ export function useCreatePayout() {
         p_paid_on: v.paidOn || null,
         p_method: v.method || null,
         p_reference: v.reference.trim() || null,
+        p_expected_total: v.expectedTotal,
       });
       if (error) throw error;
       return data as { payout_id: string; amount: number; lines: PayoutLine[] };

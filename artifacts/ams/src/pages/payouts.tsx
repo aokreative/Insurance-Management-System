@@ -25,6 +25,7 @@ import type { PayoutMethod } from '@/lib/types';
 import { Plus } from 'lucide-react';
 
 const NOTHING_TO_PAY = 'Nothing to pay for this agent up to that date';
+const AMOUNT_CHANGED = 'The amount owed changed — review the payout again';
 
 function useMemberOptions() {
   const { data: users } = useAgencyUsers();
@@ -45,7 +46,7 @@ function NewPayoutDialog({ open, onOpenChange, initialAgentId }: { open: boolean
   const [method, setMethod] = useState<PayoutMethod | ''>('');
   const [reference, setReference] = useState('');
 
-  const { data: preview, isFetching, error: previewError } = usePreviewPayout(agentId || undefined, periodEnd || undefined);
+  const { data: preview, isFetching, error: previewError, refetch: refetchPreview } = usePreviewPayout(agentId || undefined, periodEnd || undefined);
   const total = preview ? Number(preview.total) : 0;
   const nothing = !!preview && total <= 0;
 
@@ -61,15 +62,20 @@ function NewPayoutDialog({ open, onOpenChange, initialAgentId }: { open: boolean
   };
 
   const confirm = () => {
+    if (!preview) return;
     createPayout.mutate(
-      { agentId, periodEnd, paidOn, method, reference },
+      { agentId, periodEnd, paidOn, method, reference, expectedTotal: total },
       {
         onSuccess: (res) => {
           toast({ title: `Payout recorded — ${kes(res.amount)}` });
           reset(false);
           navigate(`/payouts/${res.payout_id}`);
         },
-        onError: (err: any) => toast({ title: 'Could not record payout', description: err.message, variant: 'destructive' }),
+        onError: (err: any) => {
+          toast({ title: 'Could not record payout', description: err.message, variant: 'destructive' });
+          // Stale preview: show the new amount and keep the dialog open for review
+          if (err?.message === AMOUNT_CHANGED) refetchPreview();
+        },
       },
     );
   };
@@ -179,7 +185,7 @@ function NewPayoutDialog({ open, onOpenChange, initialAgentId }: { open: boolean
         <DialogFooter className="items-center gap-2">
           {nothing && <span className="text-sm text-muted-foreground sm:mr-auto">{NOTHING_TO_PAY}</span>}
           <Button variant="outline" onClick={() => reset(false)}>Cancel</Button>
-          <Button onClick={confirm} disabled={!agentId || !preview || nothing || createPayout.isPending}>
+          <Button onClick={confirm} disabled={!agentId || !preview || nothing || !method || !paidOn || isFetching || createPayout.isPending}>
             {createPayout.isPending ? 'Recording...' : 'Confirm payout'}
           </Button>
         </DialogFooter>

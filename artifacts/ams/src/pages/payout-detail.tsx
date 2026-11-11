@@ -1,4 +1,5 @@
 import { Link, useRoute } from 'wouter';
+import { useAuth } from '@/contexts/AuthContext';
 import { usePayout } from '@/hooks/payouts';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -9,6 +10,8 @@ import { ArrowLeft, Printer } from 'lucide-react';
 export default function PayoutDetail() {
   const [, params] = useRoute('/payouts/:id');
   const { data, isLoading, error } = usePayout(params?.id);
+  const { isOwnerOrManager } = useAuth();
+  const backHref = isOwnerOrManager ? '/payouts' : '/my-earnings';
 
   if (isLoading) return <div className="text-muted-foreground">Loading...</div>;
   if (error) return <div className="text-destructive">{(error as Error).message}</div>;
@@ -21,7 +24,7 @@ export default function PayoutDetail() {
     <div className="space-y-6 max-w-4xl">
       <div className="flex items-center justify-between gap-4 print:hidden">
         <Button variant="ghost" asChild>
-          <Link href="/payouts"><ArrowLeft className="w-4 h-4 mr-2" /> Back</Link>
+          <Link href={backHref}><ArrowLeft className="w-4 h-4 mr-2" /> Back</Link>
         </Button>
         <Button variant="outline" onClick={() => window.print()}>
           <Printer className="w-4 h-4 mr-2" /> Print / Save as PDF
