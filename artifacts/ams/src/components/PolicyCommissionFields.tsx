@@ -3,28 +3,38 @@ import type { UseFormReturn } from 'react-hook-form';
 import { FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { autoCommissionBasis } from '@/lib/policy-form';
 
 /** Commission type + per-premium fields. The form needs product_line_id and the fields from lib/policy-form. */
 export function PolicyCommissionFields({
   form,
   productLines,
+  keepInitialBasis = false,
 }: {
   form: UseFormReturn<any>;
   productLines: { id: string; name: string }[] | undefined;
+  /** Pre-filled forms (e.g. Renew): keep the loaded commission type until the user picks another product line. */
+  keepInitialBasis?: boolean;
 }) {
   const manual = useRef(false);
+  const initialLine = useRef<string | null>(null);
   const productLineId: string = form.watch('product_line_id');
   const basis: string = form.watch('commission_basis');
 
   useEffect(() => {
     if (!productLineId) {
       manual.current = false; // form was reset
+      initialLine.current = null;
       return;
     }
-    if (manual.current) return;
+    if (keepInitialBasis && (initialLine.current === null || initialLine.current === productLineId)) {
+      initialLine.current = productLineId;
+      return;
+    }
     const name = productLines?.find((p) => p.id === productLineId)?.name;
-    form.setValue('commission_basis', name === 'Life' ? 'per_premium' : 'annual');
-  }, [productLineId, productLines, form]);
+    const next = autoCommissionBasis(name, manual.current);
+    if (next) form.setValue('commission_basis', next);
+  }, [productLineId, productLines, form, keepInitialBasis]);
 
   return (
     <div className="space-y-4">

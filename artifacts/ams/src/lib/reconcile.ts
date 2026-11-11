@@ -107,14 +107,19 @@ export function matchLines(
   for (const list of byNumber.values()) {
     list.sort((a, b) => (a.start_date ?? '').localeCompare(b.start_date ?? ''));
   }
-  // The oldest term with commission still outstanding, else the latest term.
-  const pick = (number: string) => {
+  // The oldest term whose outstanding covers the line, else the latest term with any
+  // outstanding, else the latest term (a small leftover on an old term must not
+  // swallow a payment for the new one).
+  const pick = (number: string, cents: number) => {
     const list = byNumber.get(normalisePolicyNumber(number));
     if (!list || list.length === 0) return undefined;
-    return list.find((p) => (remaining.get(p.id) ?? 0) > 0) ?? list[list.length - 1];
+    const open = list.filter((p) => (remaining.get(p.id) ?? 0) > 0);
+    return (
+      open.find((p) => (remaining.get(p.id) ?? 0) >= cents) ?? open[open.length - 1] ?? list[list.length - 1]
+    );
   };
   return lines.map((l) => {
-    const p = pick(l.policyNumber);
+    const p = pick(l.policyNumber, l.commissionCents ?? 0);
     const policyId = p ? p.id : null;
     const c = l.commissionCents ?? 0;
     if (c <= 0) return { line: l, policyId, status: 'reversal', applyCents: 0 };

@@ -98,6 +98,15 @@ describe('matchLines', () => {
     expect(r.map((x) => x.policyId)).toEqual(['old', 'new']);
     expect(r.map((x) => x.status)).toEqual(['matched', 'matched']);
   });
+  it('same number: a small leftover on the old term does not swallow the new term payment', () => {
+    const terms = [
+      { id: 'old', policy_number: 'BRI/R', commission_basis: 'annual' as const, outstandingCents: 1000, start_date: '2025-06-01' },
+      { id: 'new', policy_number: 'BRI/R', commission_basis: 'annual' as const, outstandingCents: 500000, start_date: '2026-06-01' },
+    ];
+    const r = matchLines([line('BRI/R', 500000), line('BRI/R', 1000)], terms);
+    expect(r.map((x) => x.policyId)).toEqual(['new', 'old']);
+    expect(r.map((x) => x.status)).toEqual(['matched', 'matched']);
+  });
   it('same number, nothing outstanding: the latest term wins', () => {
     const terms = [
       { id: 'old', policy_number: 'BRI/R', commission_basis: 'annual' as const, outstandingCents: 0, start_date: '2025-06-01' },

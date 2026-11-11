@@ -445,7 +445,7 @@ function RenewDialog({ row, onClose }: DialogProps) {
                   )}
                 />
               </div>
-              <PolicyCommissionFields form={form} productLines={productLines} />
+              <PolicyCommissionFields form={form} productLines={productLines} keepInitialBasis />
               <FormField
                 control={form.control}
                 name="notes"

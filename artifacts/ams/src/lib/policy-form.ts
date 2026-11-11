@@ -43,6 +43,18 @@ export function withCommissionColumns<T extends CommissionValues>(values: T) {
   };
 }
 
+/**
+ * Commission type implied by the product line: Life is paid per premium, the rest annually.
+ * Returns null when the user (or a pre-filled form) has already chosen, or there is no line yet.
+ */
+export function autoCommissionBasis(
+  productLineName: string | undefined,
+  manual: boolean,
+): 'annual' | 'per_premium' | null {
+  if (manual || !productLineName) return null;
+  return productLineName === 'Life' ? 'per_premium' : 'annual';
+}
+
 export const commissionDefaults = {
   commission_basis: 'annual' as 'annual' | 'per_premium',
   premium_frequency: '' as '' | 'monthly' | 'quarterly' | 'half_yearly' | 'yearly',
