@@ -56,12 +56,13 @@ Three fixed roles, enforced by Postgres RLS and role-checked RPCs. An Agent call
 | Clients | All, full edit | All, full edit | Only clients assigned to them; no delete |
 | Policies | All, full edit | All, full edit | Only their own; no delete |
 | Commissions | All; mark received | All; mark received | Read only, on own policies |
-| Renewal reminders | All | All | Read only, on own policies |
+| Renewal pipeline | Any policy; reopen lost | Any policy; reopen lost | Own policies, when the agency allows it |
 | Reports & company totals | Read, generate | Read, generate | None |
 | Insurers, product lines | Edit | Edit | Read |
 | Team list | All members | All members | Own row only |
 | Agency settings | Edit | Read | Read |
 | Agent rates | Edit | View | Own only |
+| Agents-update-renewals switch | Edit | Read | Read |
 | Invite staff | Managers and agents | Agents only | No |
 | Change roles, remove staff | Yes | No | No |
 
@@ -71,7 +72,7 @@ Demo logins exist for the demo agency: `demo@ams.co.ke` (Owner), `manager@ams.co
 
 ## Database
 
-Supabase project: **ERP Demo** (`frzjhknbocuaduuduxkk`). Migrations 001–013a are applied
+Supabase project: **ERP Demo** (`frzjhknbocuaduuduxkk`). Migrations 001–014 are applied
 (`006a` is its own file and must be run after 006; `007a` and `008a` were live follow-ups folded into `007` and `008`; `009a`, `010a` and `010b` were live follow-ups folded into `009` and `010`).
 New migrations go in `supabase/migrations/` and should be applied in order.
 
@@ -92,10 +93,11 @@ New migrations go in `supabase/migrations/` and should be applied in order.
 | 012 | Reconciliation follow-ups: monthly report by receipt date, undo unmatches the line, apply_receipt_allocations |
 | 013 | Agent commission & payouts: rates, earnings ledger, payouts |
 | 013a | Payout follow-ups: expected-total guard on create_agent_payout, reversal/adjustment dating (Africa/Nairobi), rates for removed members, remove_member clears rates |
+| 014 | Renewal pipeline: stages, history, renew_policy, agents switch, policy numbers unique only among active terms, placeholder reminders retired, renewal figures in the monthly report |
 
 ### Running the database tests
 
-`supabase/tests/` holds one script per feature (`006` to `013a`: team access, invites, team management, reconciliation schema, reconciliation RPCs, opening balances, reconciliation follow-ups, agent payouts, payout follow-ups). Paste each file into the Supabase SQL editor, or run it through the Supabase MCP `execute_sql`. Each runs inside a transaction that is always rolled back (nothing is saved) and prints `ALL PASSED`; a failed assertion aborts the batch with the reason.
+`supabase/tests/` holds one script per feature (`006` to `014`: team access, invites, team management, reconciliation schema, reconciliation RPCs, opening balances, reconciliation follow-ups, agent payouts, payout follow-ups, renewal pipeline). Paste each file into the Supabase SQL editor, or run it through the Supabase MCP `execute_sql`. Each runs inside a transaction that is always rolled back (nothing is saved) and prints `ALL PASSED`; a failed assertion aborts the batch with the reason.
 
 ## Receipts & reconciliation
 
@@ -117,6 +119,18 @@ Agents earn their rate x the commission actually received from the insurer (not 
 - Printable statements per payout.
 - Agents see only "My earnings" (their own earnings and payouts).
 
+## Renewal pipeline
+
+Every active policy expiring within 90 days (or already expired) is in the pipeline: **To contact → Contacted → Quoted → Renewed / Lost**. Nobody has to add it by hand.
+
+- **Log contact** (phone, WhatsApp, SMS, email, in person), **Record quote** (insurer + premium; a newer quote replaces the old) and **Mark lost** (reason: price, went to another agent/insurer, no longer needs cover, no response, other) are kept as a history per renewal.
+- **Renew** creates the next-term policy in one step (same client and agent, pre-filled dates, insurer and premium from the latest quote), links it, marks the old policy expired, and the new policy's expected commission is created as usual. Deleting that new policy puts the renewal back where it was.
+- A renewed term may keep the old policy number: numbers are unique only among active/pending policies, and statement matching picks the term that still has commission outstanding.
+- Owners and Managers can update any renewal and reopen lost ones. Agents can update renewals of their own policies while **Settings → Agency → Agents can update their own renewals** is on (Owner switch, on by default). Enforced in the database.
+- The Renewals page shows due in 30 days, overdue, renewal rate (renewed ÷ renewed + lost, by month closed) and premium renewed; the monthly report adds `renewals_renewed`, `renewals_lost` and `renewal_rate`.
+- The old auto-scheduled 90/60/30-day placeholder reminders were never sent, so migration 014 removed them; manually logged reminders were copied into the renewal history. Automatic WhatsApp/email reminders belong to the automated-reports phase.
+- Full design: `docs/superpowers/specs/2026-11-11-renewal-pipeline-design.md`.
+
 ## Deploying (Vercel)
 
 Project `insurance-management-system-ams`, root directory `artifacts/ams`. Pushing to `main` deploys.
@@ -132,6 +146,7 @@ Required env vars: `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`.
 - ✅ Team & access control: Owner / Manager / Agent roles, invites, team management, role-based views
 - ✅ Statement reconciliation: insurer receipts, statement lines, applied/unapplied money, part-paid commissions
 - ✅ Agent commission & payouts: agent rates, earnings ledger, payouts, statements, My earnings
+- ✅ Renewal pipeline: contacted → quoted → renewed/lost, one-step renew, lost reasons, renewal rate
 - 🔲 Phase 6: Polish (mobile-first, onboarding flow)
 
 ## Gotchas

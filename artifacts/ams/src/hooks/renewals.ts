@@ -132,7 +132,7 @@ function useRenewalMutation<TVars, TResult = unknown>(fn: (vars: TVars) => Promi
   return useMutation({
     mutationFn: fn,
     onSuccess: () => {
-      for (const key of ['renewals', 'renewal-activities', 'policies', 'policy', 'commissions', 'dashboard', 'overdue-renewals']) {
+      for (const key of ['renewals', 'renewal-activities', 'policies', 'policy', 'commissions', 'dashboard-metrics']) {
         queryClient.invalidateQueries({ queryKey: [key] });
       }
     },

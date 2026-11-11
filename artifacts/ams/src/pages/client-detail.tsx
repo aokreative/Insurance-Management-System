@@ -26,6 +26,8 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 import { commissionFields, refineCommission, withCommissionColumns, commissionDefaults } from '@/lib/policy-form';
 import { PolicyCommissionFields } from '@/components/PolicyCommissionFields';
+import { RenewalBadges } from '@/components/renewals/RenewalBadges';
+import { useRenewalForPolicies } from '@/hooks/renewals';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -50,6 +52,8 @@ export default function ClientDetail() {
   
   const { data: client, isLoading: isClientLoading } = useClient(clientId);
   const { data: policies, isLoading: isPoliciesLoading } = usePolicies({ clientId });
+  const { data: renewalInfo } = useRenewalForPolicies((policies ?? []).map((p) => p.id));
+  const numberById = Object.fromEntries((policies ?? []).map((p) => [p.id, p.policy_number]));
   const { data: insurers } = useInsurers();
   const { data: productLines } = useProductLines();
   const { data: members } = useAgencyMembers();
@@ -396,7 +400,10 @@ export default function ClientDetail() {
                   <TableBody>
                     {policies.map(policy => (
                       <TableRow key={policy.id}>
-                        <TableCell className="font-medium">{policy.policy_number}</TableCell>
+                        <TableCell className="font-medium">
+                          {policy.policy_number}
+                          <RenewalBadges policyId={policy.id} info={renewalInfo} numberById={numberById} />
+                        </TableCell>
                         <TableCell>
                           <div className="text-sm font-medium">{policy.product_line?.name}</div>
                           <div className="text-xs text-muted-foreground">{policy.insurer?.name}</div>

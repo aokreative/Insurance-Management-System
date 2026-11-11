@@ -10,6 +10,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from '@/components/ui/dialog';
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
+import { RenewalBadges } from '@/components/renewals/RenewalBadges';
+import { useRenewalForPolicies } from '@/hooks/renewals';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
@@ -77,6 +79,10 @@ export default function Policies() {
       ...commissionDefaults,
     },
   });
+
+  const policyIds = (policies ?? []).map((p) => p.id);
+  const { data: renewalInfo } = useRenewalForPolicies(policyIds);
+  const numberById = Object.fromEntries((policies ?? []).map((p) => [p.id, p.policy_number]));
 
   const filteredPolicies = policies?.filter(p => 
     p.policy_number.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -368,6 +374,7 @@ export default function Policies() {
                     <TableCell>
                       <div className="font-medium text-primary">{policy.policy_number}</div>
                       <div className="text-sm font-medium">{policy.client?.name ?? '—'}</div>
+                      <RenewalBadges policyId={policy.id} info={renewalInfo} numberById={numberById} />
                     </TableCell>
                     <TableCell>
                       <div className="text-sm font-medium">{policy.product_line?.name}</div>
