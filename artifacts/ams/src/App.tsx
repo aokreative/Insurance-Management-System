@@ -22,6 +22,9 @@ import Commissions from '@/pages/commissions';
 import Receipts from '@/pages/receipts';
 import ReceiptNew from '@/pages/receipt-new';
 import ReceiptDetail from '@/pages/receipt-detail';
+import Payouts from '@/pages/payouts';
+import PayoutDetail from '@/pages/payout-detail';
+import MyEarnings from '@/pages/my-earnings';
 import Renewals from '@/pages/renewals';
 import Reports from '@/pages/reports';
 import Settings from '@/pages/settings';
@@ -71,6 +74,9 @@ function Router() {
       <Route path="/receipts" component={() => <ProtectedRoute component={Receipts} />} />
       <Route path="/receipts/new" component={() => <ProtectedRoute component={ReceiptNew} />} />
       <Route path="/receipts/:id" component={() => <ProtectedRoute component={ReceiptDetail} />} />
+      <Route path="/payouts" component={() => <ProtectedRoute component={Payouts} />} />
+      <Route path="/payouts/:id" component={() => <ProtectedRoute component={PayoutDetail} />} />
+      <Route path="/my-earnings" component={() => <ProtectedRoute component={MyEarnings} />} />
       <Route path="/renewals" component={() => <ProtectedRoute component={Renewals} />} />
       <Route path="/reports" component={() => <ProtectedRoute component={Reports} />} />
       <Route path="/insurers" component={() => <ProtectedRoute component={Insurers} />} />
