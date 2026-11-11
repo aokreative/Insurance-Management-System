@@ -487,62 +487,6 @@ export function useCreateCommission() {
     },
   });
 }
-
-// ============================================================================
-// RENEWAL REMINDERS
-// ============================================================================
-
-export function useRenewalReminders(policyId?: string) {
-  const { agency, session } = useAuth();
-  return useQuery({
-    queryKey: ['renewal-reminders', agency?.id, policyId],
-    queryFn: async () => {
-      let query = supabase
-        .from('renewal_reminders')
-        .select('*')
-        .eq('agency_id', agency?.id)
-        .order('reminder_date', { ascending: false });
-      if (policyId) query = query.eq('policy_id', policyId);
-      const { data, error } = await query;
-      if (error) throw error;
-      return data;
-    },
-    enabled: !!session && !!agency?.id,
-  });
-}
-
-export function useCreateRenewalReminder() {
-  const queryClient = useQueryClient();
-  const { agency } = useAuth();
-
-  return useMutation({
-    mutationFn: async (reminder: {
-      policy_id: string;
-      reminder_date: string;
-      channel: 'whatsapp' | 'email' | 'sms';
-      sent?: boolean;
-      notes?: string | null;
-    }) => {
-      if (!agency?.id) throw new Error('No agency');
-      const { data, error } = await supabase
-        .from('renewal_reminders')
-        .insert({
-          ...reminder,
-          agency_id: agency.id,
-          sent: reminder.sent ?? true,
-          sent_at: reminder.sent !== false ? new Date().toISOString() : null,
-        })
-        .select()
-        .single();
-      if (error) throw error;
-      return data;
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['renewal-reminders'] });
-    },
-  });
-}
-
 // ============================================================================
 // REPORTS — archive + chart data hooks (Phase 4 & 5)
 // ============================================================================
@@ -728,65 +672,6 @@ export function useYtdSummary() {
         commReceivedYtd,
         collectionRate: commExpected > 0 ? Math.round((commReceived / commExpected) * 1000) / 10 : 0,
       };
-    },
-    enabled: !!session && !!agency?.id,
-  });
-}
-
-// ============================================================================
-// RENEWALS — extra queries for Phase 3
-// ============================================================================
-
-/** Returns reminder rows grouped by policy_id. Pass the list of visible policy IDs. */
-export function useRenewalReminderCounts(policyIds: string[]) {
-  const { agency, session } = useAuth();
-  return useQuery({
-    queryKey: ['renewal-reminder-counts', agency?.id, policyIds.join(',')],
-    queryFn: async () => {
-      if (!policyIds.length) return {} as Record<string, Array<{ id: string; reminder_date: string; channel: string; notes: string | null; sent_at: string | null }>>;
-      const { data, error } = await supabase
-        .from('renewal_reminders')
-        .select('id, policy_id, reminder_date, channel, notes, sent_at')
-        .eq('agency_id', agency?.id)
-        .in('policy_id', policyIds)
-        .order('reminder_date', { ascending: false });
-      if (error) throw error;
-      // Group by policy_id
-      return (data ?? []).reduce((acc, r) => {
-        if (!acc[r.policy_id]) acc[r.policy_id] = [];
-        acc[r.policy_id].push(r);
-        return acc;
-      }, {} as Record<string, typeof data>);
-    },
-    enabled: !!session && !!agency?.id && policyIds.length > 0,
-  });
-}
-
-/** Active policies already past their expiry date — renewal failures. */
-export function useOverdueRenewals() {
-  const { agency, session } = useAuth();
-  return useQuery({
-    queryKey: ['overdue-renewals', agency?.id],
-    queryFn: async () => {
-      const today = new Date().toISOString().split('T')[0];
-      const { data, error } = await supabase
-        .from('policies')
-        .select(`
-          id, policy_number, expiry_date, premium_amount,
-          client:clients(name, phone, email),
-          insurer:insurers(name),
-          product_line:product_lines(name),
-          agent:users(full_name)
-        `)
-        .eq('agency_id', agency?.id)
-        .eq('status', 'active')
-        .lt('expiry_date', today)
-        .order('expiry_date', { ascending: true });
-      if (error) throw error;
-      return ((data ?? []) as any[]).map((p: any) => ({
-        ...p,
-        days_overdue: Math.floor((Date.now() - new Date(p.expiry_date).getTime()) / 86_400_000),
-      }));
     },
     enabled: !!session && !!agency?.id,
   });

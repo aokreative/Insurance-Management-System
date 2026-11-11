@@ -90,16 +90,36 @@ export function matchLines(
     policy_number: string;
     commission_basis: 'annual' | 'per_premium';
     outstandingCents: number;
+    /** Renewed terms may share a policy number; the term start decides which one a line matches. */
+    start_date?: string;
   }[],
 ): { line: DraftLine; policyId: string | null; status: MatchStatus; applyCents: number }[] {
-  const byNumber = new Map<string, (typeof policies)[number]>();
+  // Terms per number, oldest first
+  const byNumber = new Map<string, (typeof policies)[number][]>();
   const remaining = new Map<string, number>();
   for (const p of policies) {
-    byNumber.set(normalisePolicyNumber(p.policy_number), p);
+    const key = normalisePolicyNumber(p.policy_number);
+    const list = byNumber.get(key) ?? [];
+    list.push(p);
+    byNumber.set(key, list);
     remaining.set(p.id, p.outstandingCents);
   }
+  for (const list of byNumber.values()) {
+    list.sort((a, b) => (a.start_date ?? '').localeCompare(b.start_date ?? ''));
+  }
+  // The oldest term whose outstanding covers the line, else the latest term with any
+  // outstanding, else the latest term (a small leftover on an old term must not
+  // swallow a payment for the new one).
+  const pick = (number: string, cents: number) => {
+    const list = byNumber.get(normalisePolicyNumber(number));
+    if (!list || list.length === 0) return undefined;
+    const open = list.filter((p) => (remaining.get(p.id) ?? 0) > 0);
+    return (
+      open.find((p) => (remaining.get(p.id) ?? 0) >= cents) ?? open[open.length - 1] ?? list[list.length - 1]
+    );
+  };
   return lines.map((l) => {
-    const p = byNumber.get(normalisePolicyNumber(l.policyNumber));
+    const p = pick(l.policyNumber, l.commissionCents ?? 0);
     const policyId = p ? p.id : null;
     const c = l.commissionCents ?? 0;
     if (c <= 0) return { line: l, policyId, status: 'reversal', applyCents: 0 };

@@ -7,9 +7,11 @@ import { FileText, DollarSign, CalendarClock, AlertCircle } from 'lucide-react';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { startOfMonth, endOfMonth, addDays, startOfDay, format } from 'date-fns';
+import { startOfMonth, endOfMonth, startOfDay, format } from 'date-fns';
 import { OnboardingChecklist } from '@/components/OnboardingChecklist';
 import { projectedMonthlyCommission } from '@/lib/projection';
+import { stageLabel } from '@/lib/renewals';
+import type { RenewalStage } from '@/lib/types';
 
 export default function Dashboard() {
   const { agency, session, profile, isOwnerOrManager } = useAuth();
@@ -23,7 +25,6 @@ export default function Dashboard() {
       if (!agency?.id) throw new Error('No agency');
       
       const today = startOfDay(new Date()).toISOString();
-      const in30Days = addDays(new Date(), 30).toISOString();
       const startOfCurrentMonth = startOfMonth(new Date()).toISOString();
       const endOfCurrentMonth = endOfMonth(new Date()).toISOString();
       
@@ -43,14 +44,14 @@ export default function Dashboard() {
         
       const totalPremium = premiumData?.reduce((sum, p) => sum + (p.premium_amount || 0), 0) || 0;
       
-      // 3. Expiring in 30 days
+      // 3. Open renewals expiring in the next 30 days (renewed/lost ones are done)
       const { count: expiringCount } = await supabase
-        .from('policies')
-        .select('*', { count: 'exact', head: true })
+        .from('renewal_pipeline')
+        .select('policy_id', { count: 'exact', head: true })
         .eq('agency_id', agency.id)
-        .eq('status', 'active')
-        .gte('expiry_date', today)
-        .lte('expiry_date', in30Days);
+        .in('stage', ['to_contact', 'contacted', 'quoted'])
+        .gte('days_to_expiry', 0)
+        .lte('days_to_expiry', 30);
         
       // 4. Commissions this month (expected & received)
       const { data: commissionsThisMonth } = await supabase
@@ -100,19 +101,24 @@ export default function Dashboard() {
         .limit(5);
         
       // 7. Upcoming renewals (next 30 days list)
-      const { data: upcomingRenewals } = await supabase
-        .from('policies')
-        .select(`
-          id, policy_number, expiry_date, status,
-          client:clients(name),
-          insurer:insurers(name)
-        `)
+      const { data: upcomingRows } = await supabase
+        .from('renewal_pipeline')
+        .select('policy_id, policy_number, expiry_date, client_name, insurer_name, stage, days_to_expiry')
         .eq('agency_id', agency.id)
-        .eq('status', 'active')
-        .gte('expiry_date', today)
-        .lte('expiry_date', in30Days)
+        .in('stage', ['to_contact', 'contacted', 'quoted'])
+        .gte('days_to_expiry', 0)
+        .lte('days_to_expiry', 30)
         .order('expiry_date', { ascending: true })
         .limit(5);
+      const upcomingRenewals = (upcomingRows ?? []).map((r: any) => ({
+        id: r.policy_id,
+        policy_number: r.policy_number,
+        expiry_date: r.expiry_date,
+        stage: r.stage as RenewalStage,
+        daysLeft: r.days_to_expiry as number,
+        client: { name: r.client_name },
+        insurer: { name: r.insurer_name },
+      }));
 
       // 7b. Active per-premium (life) policies for the monthly projection
       const { data: perPremiumPolicies } = await supabase
@@ -282,7 +288,7 @@ export default function Dashboard() {
                   </TableHeader>
                   <TableBody>
                     {metrics?.upcomingRenewals.map((policy: any) => {
-                      const daysLeft = Math.ceil((new Date(policy.expiry_date).getTime() - new Date().getTime()) / (1000 * 3600 * 24));
+                      const daysLeft: number = policy.daysLeft;
                       const isUrgent = daysLeft <= 7;
                       return (
                         <TableRow key={policy.id}>
@@ -290,6 +296,7 @@ export default function Dashboard() {
                           <TableCell>
                             <div className="text-sm">{policy.policy_number}</div>
                             <div className="text-xs text-muted-foreground">{policy.insurer?.name}</div>
+                            <div className="text-xs text-muted-foreground">{stageLabel(policy.stage)}</div>
                           </TableCell>
                           <TableCell className="text-right">
                             <div className={`font-medium ${isUrgent ? 'text-destructive' : ''}`}>

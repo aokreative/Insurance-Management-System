@@ -1,461 +1,377 @@
-import React, { useState, useEffect } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { supabase } from '@/lib/supabase';
+import { useMemo, useState } from 'react';
+import { endOfMonth, format, startOfMonth } from 'date-fns';
+import { AlertTriangle, CalendarClock, Download, MoreHorizontal, Percent, Wallet } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
-import { Card, CardContent } from '@/components/ui/card';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { StatCard } from '@/components/StatCard';
 import { Badge } from '@/components/ui/badge';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { formatDate } from '@/lib/utils';
-import { BellRing, CalendarClock, CheckCircle2, MessageCircle, Mail, MessageSquare, Download, AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { addDays, startOfDay } from 'date-fns';
-import { useCreateRenewalReminder, useOverdueRenewals, useRenewalReminderCounts } from '@/hooks/queries';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
-import { useForm } from 'react-hook-form';
-import { zodResolver } from '@hookform/resolvers/zod';
-import * as z from 'zod';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { RenewalActionDialogs, type RenewalAction } from '@/components/renewals/RenewalDialogs';
+import { RenewalDrawer } from '@/components/renewals/RenewalDrawer';
+import { useAgencyUsers } from '@/hooks/queries';
+import { useClosedRenewals, useOpenRenewals, useReopenRenewal, type RenewalWindow } from '@/hooks/renewals';
 import { useToast } from '@/hooks/use-toast';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { exportToCsv } from '@/lib/csv-export';
+import { fromCents, toCents } from '@/lib/reconcile';
+import {
+  LOST_REASONS,
+  RENEWAL_STAGES,
+  canUpdateRenewals,
+  lostReasonLabel,
+  renewalRate,
+  stageLabel,
+} from '@/lib/renewals';
+import { formatCurrency, formatDate } from '@/lib/utils';
+import type { RenewalRow, RenewalStage } from '@/lib/types';
 
-const reminderSchema = z.object({
-  channel: z.enum(['whatsapp', 'email', 'sms']),
-  reminder_date: z.string().min(1, 'Required'),
-  notes: z.string().optional()
-});
+const WINDOWS: { value: RenewalWindow; label: string }[] = [
+  { value: 'all', label: 'All open' },
+  { value: 'overdue', label: 'Overdue' },
+  { value: '30', label: 'Next 30 days' },
+  { value: '60', label: 'Next 60 days' },
+  { value: '90', label: 'Next 90 days' },
+];
 
-type ReminderFormValues = z.infer<typeof reminderSchema>;
+function inWindow(r: RenewalRow, w: RenewalWindow): boolean {
+  if (w === 'all') return true;
+  if (w === 'overdue') return r.days_to_expiry < 0;
+  return r.days_to_expiry >= 0 && r.days_to_expiry <= Number(w);
+}
+
+function ExpiryBadge({ days }: { days: number }) {
+  if (days < 0) {
+    return (
+      <span className="mt-1 flex items-center justify-end gap-1 text-xs font-semibold text-destructive">
+        <AlertTriangle className="h-3 w-3" />
+        {-days} {days === -1 ? 'day' : 'days'} overdue
+      </span>
+    );
+  }
+  return (
+    <Badge variant={days <= 7 ? 'destructive' : 'secondary'} className="mt-1">
+      {days === 0 ? 'Today' : `In ${days} ${days === 1 ? 'day' : 'days'}`}
+    </Badge>
+  );
+}
 
 export default function Renewals() {
-  const { agency, session, profile, isOwnerOrManager } = useAuth();
-  const isAgent = !!profile && !isOwnerOrManager;
+  const { agency, profile, isOwnerOrManager } = useAuth();
   const { toast } = useToast();
-  const createReminder = useCreateRenewalReminder();
-  
-  const [reminderPolicyId, setReminderPolicyId] = useState<string | null>(null);
-  
-  const form = useForm<ReminderFormValues>({
-    resolver: zodResolver(reminderSchema),
-    defaultValues: {
-      channel: 'email',
-      reminder_date: new Date().toISOString().split('T')[0],
-      notes: ''
-    }
-  });
+  const isAgent = !!profile && !isOwnerOrManager;
+  const agentsManage = agency?.agents_manage_renewals ?? true;
 
-  const onSubmitReminder = (values: ReminderFormValues) => {
-    if (!reminderPolicyId) return;
-    createReminder.mutate({
-      policy_id: reminderPolicyId,
-      ...values
-    }, {
-      onSuccess: () => {
-        toast({ title: 'Reminder logged successfully' });
-        setReminderPolicyId(null);
-        form.reset();
-      },
-      onError: (err) => {
-        toast({ title: 'Error logging reminder', description: err.message, variant: 'destructive' });
-      }
-    });
+  const [stage, setStage] = useState<RenewalStage>('to_contact');
+  const [expiryWindow, setExpiryWindow] = useState<RenewalWindow>('all');
+  const [agentId, setAgentId] = useState<string>('all');
+  const [month, setMonth] = useState(format(new Date(), 'yyyy-MM'));
+  const [action, setAction] = useState<RenewalAction | null>(null);
+  const [actionRow, setActionRow] = useState<RenewalRow | null>(null);
+  const [drawerRow, setDrawerRow] = useState<RenewalRow | null>(null);
+
+  const monthStart = month ? startOfMonth(new Date(`${month}-01T00:00:00`)) : startOfMonth(new Date());
+  const from = format(monthStart, 'yyyy-MM-dd');
+  const to = format(endOfMonth(monthStart), 'yyyy-MM-dd');
+  const agentFilter = isOwnerOrManager && agentId !== 'all' ? agentId : undefined;
+
+  const { data: users } = useAgencyUsers();
+  const { data: open, isLoading: openLoading } = useOpenRenewals(agentFilter);
+  const { data: closed, isLoading: closedLoading } = useClosedRenewals(from, to, agentFilter);
+  const reopen = useReopenRenewal();
+
+  const openInWindow = useMemo(() => (open ?? []).filter((r) => inWindow(r, expiryWindow)), [open, expiryWindow]);
+
+  const counts = useMemo(() => {
+    const c: Record<RenewalStage, number> = { to_contact: 0, contacted: 0, quoted: 0, renewed: 0, lost: 0 };
+    for (const r of openInWindow) c[r.stage]++;
+    for (const r of closed ?? []) c[r.stage]++;
+    return c;
+  }, [openInWindow, closed]);
+
+  const rows = useMemo(() => {
+    if (stage === 'renewed' || stage === 'lost') return (closed ?? []).filter((r) => r.stage === stage);
+    return openInWindow.filter((r) => r.stage === stage);
+  }, [stage, openInWindow, closed]);
+
+  const due30 = (open ?? []).filter((r) => r.days_to_expiry >= 0 && r.days_to_expiry <= 30).length;
+  const overdue = (open ?? []).filter((r) => r.days_to_expiry < 0).length;
+  const rate = renewalRate(counts.renewed, counts.lost);
+  const premiumRenewedCents = (closed ?? [])
+    .filter((r) => r.stage === 'renewed')
+    .reduce((s, r) => s + (toCents(r.renewed_premium ?? 0) ?? 0), 0);
+
+  const lostByReason = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const r of closed ?? []) if (r.stage === 'lost' && r.lost_reason) m.set(r.lost_reason, (m.get(r.lost_reason) ?? 0) + 1);
+    return LOST_REASONS.filter((r) => m.has(r)).map((r) => ({ reason: r, count: m.get(r)! }));
+  }, [closed]);
+
+  const canUpdate = (r: RenewalRow) => canUpdateRenewals(profile?.role, agentsManage, r.agent_id === profile?.id);
+  const isClosedTab = stage === 'renewed' || stage === 'lost';
+
+  const startAction = (a: RenewalAction, r: RenewalRow) => {
+    setActionRow(r);
+    setAction(a);
   };
 
-  const { data: overdueRenewals, isLoading: isOverdueLoading } = useOverdueRenewals();
-  const overdueCount = overdueRenewals?.length || 0;
-  
-  const [activeTab, setActiveTab] = useState("30");
-  const [tabInitialized, setTabInitialized] = useState(false);
-
-  useEffect(() => {
-    if (!isOverdueLoading && !tabInitialized) {
-      if (overdueCount > 0) setActiveTab("overdue");
-      setTabInitialized(true);
-    }
-  }, [isOverdueLoading, overdueCount, tabInitialized]);
-
-  const { data: renewals, isLoading } = useQuery({
-    queryKey: ['renewals', agency?.id],
-    queryFn: async () => {
-      const today = startOfDay(new Date()).toISOString();
-      const in90Days = addDays(new Date(), 90).toISOString();
-      
-      const { data, error } = await supabase
-        .from('policies')
-        .select(`
-          id, policy_number, expiry_date,
-          client:clients(name, phone, email),
-          insurer:insurers(name),
-          product_line:product_lines(name),
-          agent:users(full_name)
-        `)
-        .eq('agency_id', agency?.id)
-        .eq('status', 'active')
-        .gte('expiry_date', today)
-        .lte('expiry_date', in90Days)
-        .order('expiry_date', { ascending: true });
-        
-      if (error) throw error;
-      
-      const now = new Date().getTime();
-      
-      // Bucket them
-      const buckets = {
-        '30': [] as any[],
-        '60': [] as any[],
-        '90': [] as any[],
-      };
-      
-      data.forEach(p => {
-        const days = Math.ceil((new Date(p.expiry_date).getTime() - now) / (1000 * 3600 * 24));
-        if (days <= 30) buckets['30'].push({ ...p, days });
-        else if (days <= 60) buckets['60'].push({ ...p, days });
-        else buckets['90'].push({ ...p, days });
-      });
-      
-      return buckets;
-    },
-    enabled: !!session && !!agency?.id,
-  });
-
-  const policyIds = [
-    ...(renewals?.['30'] || []),
-    ...(renewals?.['60'] || []),
-    ...(renewals?.['90'] || []),
-    ...(overdueRenewals || [])
-  ].map(p => p.id);
-
-  const { data: remindersMap } = useRenewalReminderCounts(policyIds);
-
-  const getChannelIcon = (channel: string) => {
-    switch (channel) {
-      case 'whatsapp': return <MessageCircle className="w-3 h-3 text-green-500" />;
-      case 'email': return <Mail className="w-3 h-3 text-blue-500" />;
-      case 'sms': return <MessageSquare className="w-3 h-3 text-purple-500" />;
-      default: return null;
-    }
+  const doReopen = (r: RenewalRow) => {
+    reopen.mutate(r.policy_id, {
+      onSuccess: () => toast({ title: 'Renewal reopened' }),
+      onError: (err) => toast({ title: 'Could not reopen', description: err.message, variant: 'destructive' }),
+    });
   };
 
   const handleExportCsv = () => {
-    const allPolicies = [
-      ...(overdueRenewals || []),
-      ...(renewals?.['30'] || []),
-      ...(renewals?.['60'] || []),
-      ...(renewals?.['90'] || [])
-    ];
-    
-    if (allPolicies.length === 0) return;
-
-    const exportData = allPolicies.map(p => {
-      const reminders = remindersMap?.[p.id] || [];
-      return {
-        client_name: p.client?.name || '',
-        policy_number: p.policy_number || '',
-        product_line: p.product_line?.name || '',
-        insurer: p.insurer?.name || '',
-        expiry_date: p.expiry_date,
-        days_until_expiry: p.days ?? -(p.days_overdue ?? 0),
-        reminder_count: reminders.length
-      };
-    });
-
-    exportToCsv('renewals', exportData);
+    const all = [...(open ?? []), ...(closed ?? [])];
+    if (all.length === 0) return;
+    exportToCsv(
+      'renewals',
+      all.map((r) => ({
+        client_name: r.client_name ?? '',
+        policy_number: r.policy_number,
+        product_line: r.product_line_name ?? '',
+        insurer: r.insurer_name ?? '',
+        agent: r.agent_name ?? '',
+        expiry_date: r.expiry_date,
+        days_until_expiry: r.days_to_expiry,
+        stage: stageLabel(r.stage),
+        quoted_premium: r.quoted_premium ?? '',
+        lost_reason: r.lost_reason ? lostReasonLabel(r.lost_reason) : '',
+        closed_date: r.closed_at ? format(new Date(r.closed_at), 'yyyy-MM-dd') : '',
+      })),
+    );
   };
 
-  const renderTable = (policies: any[]) => {
-    if (isLoading) return <div className="text-center py-8">Loading renewals...</div>;
-    if (!policies || policies.length === 0) return <div className="text-center py-12 text-muted-foreground">No policies expiring in this window.</div>;
-    
-    return (
-      <div className="border rounded-md bg-card overflow-hidden">
+  const loading = isClosedTab ? closedLoading : openLoading;
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">{isAgent ? 'My Renewals' : 'Renewals'}</h1>
+          <p className="text-muted-foreground">Follow every expiring policy through to renewed or lost.</p>
+        </div>
+        <Button variant="secondary" onClick={handleExportCsv}>
+          <Download className="mr-2 h-4 w-4" /> Export CSV
+        </Button>
+      </div>
+
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <StatCard title="Due in 30 days" value={due30} icon={CalendarClock} loading={openLoading} />
+        <StatCard title="Overdue" value={overdue} icon={AlertTriangle} loading={openLoading} />
+        <StatCard
+          title="Renewal rate"
+          value={rate === null ? '—' : `${rate}%`}
+          subtitle={format(monthStart, 'MMMM yyyy')}
+          icon={Percent}
+          loading={closedLoading}
+        />
+        <StatCard
+          title="Premium renewed"
+          value={formatCurrency(fromCents(premiumRenewedCents))}
+          subtitle={format(monthStart, 'MMMM yyyy')}
+          icon={Wallet}
+          loading={closedLoading}
+        />
+      </div>
+
+      {isAgent && !agentsManage && (
+        <p className="rounded-md border bg-muted/40 p-3 text-sm text-muted-foreground">
+          Your agency has turned off renewal updates by agents. You can see your renewals; the office records the
+          follow-up.
+        </p>
+      )}
+
+      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
+        {!isClosedTab ? (
+          <div className="space-y-1">
+            <span className="text-xs text-muted-foreground">Expiry</span>
+            <Select value={expiryWindow} onValueChange={(v) => setExpiryWindow(v as RenewalWindow)}>
+              <SelectTrigger className="w-full sm:w-44"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {WINDOWS.map((w) => (
+                  <SelectItem key={w.value} value={w.value}>{w.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        ) : null}
+        <div className="space-y-1">
+          <span className="text-xs text-muted-foreground">Closed in</span>
+          <Input
+            type="month"
+            className="w-full sm:w-44"
+            value={month}
+            onChange={(e) => setMonth(e.target.value)}
+          />
+        </div>
+        {isOwnerOrManager && (
+          <div className="space-y-1">
+            <span className="text-xs text-muted-foreground">Agent</span>
+            <Select value={agentId} onValueChange={setAgentId}>
+              <SelectTrigger className="w-full sm:w-52"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All agents</SelectItem>
+                {(users ?? []).map((u) => (
+                  <SelectItem key={u.id} value={u.id}>
+                    {u.full_name}
+                    {u.deactivated_at ? ' (removed)' : ''}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
+      </div>
+
+      <Tabs value={stage} onValueChange={(v) => setStage(v as RenewalStage)}>
+        <div className="overflow-x-auto">
+          <TabsList className="h-11 border bg-card">
+            {RENEWAL_STAGES.map((s) => (
+              <TabsTrigger
+                key={s}
+                value={s}
+                className="gap-2 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground"
+              >
+                {stageLabel(s)}
+                <Badge variant="secondary" className="ml-1 h-5 min-w-[20px] rounded-full px-1.5 opacity-80">
+                  {counts[s]}
+                </Badge>
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </div>
+      </Tabs>
+
+      {stage === 'lost' && lostByReason.length > 0 && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">Why renewals were lost · {format(monthStart, 'MMMM yyyy')}</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-wrap gap-2">
+            {lostByReason.map(({ reason, count }) => (
+              <Badge key={reason} variant="outline" className="text-sm">
+                {lostReasonLabel(reason)}: {count}
+              </Badge>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
+      <div className="overflow-x-auto rounded-md border bg-card">
         <Table>
           <TableHeader>
             <TableRow>
               <TableHead>Client</TableHead>
-              <TableHead>Policy & Product</TableHead>
+              <TableHead>Policy &amp; product</TableHead>
               <TableHead>Agent</TableHead>
-              <TableHead className="text-right">Expiry Date</TableHead>
-              <TableHead>Reminders</TableHead>
-              {isOwnerOrManager && <TableHead className="text-center">Action</TableHead>}
+              <TableHead className="text-right">Expiry</TableHead>
+              <TableHead>{isClosedTab ? 'Closed' : 'Last activity'}</TableHead>
+              <TableHead className="text-right">{stage === 'lost' ? 'Reason' : 'Quote'}</TableHead>
+              <TableHead className="w-12" />
             </TableRow>
           </TableHeader>
           <TableBody>
-            {policies.map(p => {
-              const isUrgent = p.days <= 7;
-              return (
-                <TableRow key={p.id}>
-                  <TableCell>
-                    <div className="font-medium">{p.client?.name ?? '—'}</div>
-                    <div className="text-xs text-muted-foreground">{p.client?.phone || p.client?.email || 'No contact info'}</div>
-                  </TableCell>
-                  <TableCell>
-                    <div className="text-sm font-medium">{p.policy_number}</div>
-                    <div className="text-xs text-muted-foreground">{p.product_line?.name} • {p.insurer?.name}</div>
-                  </TableCell>
-                  <TableCell className="text-sm">{p.agent?.full_name}</TableCell>
-                  <TableCell className="text-right">
-                    <div className={`font-medium ${isUrgent ? 'text-destructive' : ''}`}>
-                      {formatDate(p.expiry_date)}
-                    </div>
-                    <Badge variant={isUrgent ? "destructive" : "secondary"} className="mt-1">
-                      In {p.days} days
-                    </Badge>
-                  </TableCell>
-                  <TableCell>
-                    {(() => {
-                      const reminders = remindersMap?.[p.id] || [];
-                      if (reminders.length === 0) {
-                        return <span className="text-xs text-muted-foreground opacity-70">None</span>;
-                      }
-                      return (
-                        <Popover>
-                          <PopoverTrigger asChild>
-                            <Button variant="secondary" size="sm" className="h-6 px-2 text-xs">
-                              {reminders.length} sent
-                            </Button>
-                          </PopoverTrigger>
-                          <PopoverContent className="w-64 p-3" align="start">
-                            <h4 className="font-semibold text-sm mb-2">Reminder History</h4>
-                            <div className="space-y-3 max-h-48 overflow-y-auto">
-                              {reminders.map(r => (
-                                <div key={r.id} className="text-sm space-y-1">
-                                  <div className="flex items-center gap-2 text-muted-foreground text-xs">
-                                    {getChannelIcon(r.channel)}
-                                    <span>{formatDate(r.reminder_date)}</span>
-                                  </div>
-                                  {r.notes && <p className="text-xs pl-5">{r.notes}</p>}
-                                </div>
-                              ))}
-                            </div>
-                          </PopoverContent>
-                        </Popover>
-                      );
-                    })()}
-                  </TableCell>
-                  {isOwnerOrManager && (
-                    <TableCell className="text-center">
-                      <Button size="sm" variant="outline" className="gap-2" onClick={() => {
-                        setReminderPolicyId(p.id);
-                        form.reset({
-                          channel: 'email',
-                          reminder_date: new Date().toISOString().split('T')[0],
-                          notes: ''
-                        });
-                      }}>
-                        <BellRing className="w-3 h-3" /> Log Reminder
-                      </Button>
+            {loading ? (
+              <TableRow>
+                <TableCell colSpan={7} className="py-8 text-center">Loading renewals…</TableCell>
+              </TableRow>
+            ) : rows.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={7} className="py-12 text-center text-muted-foreground">
+                  {isClosedTab ? `Nothing ${stageLabel(stage).toLowerCase()} in this month.` : 'No renewals here.'}
+                </TableCell>
+              </TableRow>
+            ) : (
+              rows.map((r) => {
+                const editable = canUpdate(r);
+                const showMenu = isClosedTab ? isOwnerOrManager && r.stage === 'lost' : editable;
+                return (
+                  <TableRow key={r.policy_id} className="cursor-pointer" onClick={() => setDrawerRow(r)}>
+                    <TableCell>
+                      <div className="font-medium">{r.client_name ?? '—'}</div>
+                      <div className="text-xs text-muted-foreground">
+                        {r.client_phone || r.client_email || 'No contact info'}
+                      </div>
                     </TableCell>
-                  )}
-                </TableRow>
-              );
-            })}
+                    <TableCell>
+                      <div className="text-sm font-medium">{r.policy_number}</div>
+                      <div className="text-xs text-muted-foreground">
+                        {r.product_line_name} · {r.insurer_name}
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-sm">{r.agent_name ?? '—'}</TableCell>
+                    <TableCell className="text-right">
+                      <div className="font-medium">{formatDate(r.expiry_date)}</div>
+                      {!isClosedTab && <ExpiryBadge days={r.days_to_expiry} />}
+                    </TableCell>
+                    <TableCell className="text-sm text-muted-foreground">
+                      {isClosedTab ? formatDate(r.closed_at) : r.last_activity_at ? formatDate(r.last_activity_at) : 'None'}
+                    </TableCell>
+                    <TableCell className="text-right text-sm">
+                      {stage === 'lost'
+                        ? r.lost_reason
+                          ? lostReasonLabel(r.lost_reason)
+                          : '—'
+                        : r.quoted_premium != null
+                          ? formatCurrency(r.quoted_premium)
+                          : '—'}
+                    </TableCell>
+                    <TableCell onClick={(e) => e.stopPropagation()}>
+                      {showMenu && (
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="icon" aria-label="Update renewal">
+                              <MoreHorizontal className="h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            {isClosedTab ? (
+                              <DropdownMenuItem onClick={() => doReopen(r)} disabled={reopen.isPending}>
+                                Reopen
+                              </DropdownMenuItem>
+                            ) : (
+                              <>
+                                <DropdownMenuItem onClick={() => startAction('contact', r)}>Log contact</DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => startAction('quote', r)}>Record quote</DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => startAction('renew', r)}>Renew…</DropdownMenuItem>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem className="text-destructive" onClick={() => startAction('lost', r)}>
+                                  Mark lost
+                                </DropdownMenuItem>
+                              </>
+                            )}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                );
+              })
+            )}
           </TableBody>
         </Table>
       </div>
-    );
-  };
 
-  return (
-    <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">{isAgent ? 'My Upcoming Renewals' : 'Upcoming Renewals'}</h1>
-          <p className="text-muted-foreground">Don't miss a renewal. Track expiring policies for the next 90 days.</p>
-        </div>
-        <Button variant="secondary" onClick={handleExportCsv}>
-          <Download className="w-4 h-4 mr-2" /> Export CSV
-        </Button>
-      </div>
-
-      <Dialog open={!!reminderPolicyId} onOpenChange={(open) => !open && setReminderPolicyId(null)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Log Renewal Reminder</DialogTitle>
-            <DialogDescription>Record that you've contacted the client about this renewal.</DialogDescription>
-          </DialogHeader>
-          <Form {...form}>
-            <form onSubmit={form.handleSubmit(onSubmitReminder)} className="space-y-4">
-              <FormField
-                control={form.control}
-                name="channel"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Channel</FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value}>
-                      <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
-                      <SelectContent>
-                        <SelectItem value="email">Email</SelectItem>
-                        <SelectItem value="whatsapp">WhatsApp</SelectItem>
-                        <SelectItem value="sms">SMS</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={form.control}
-                name="reminder_date"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Date</FormLabel>
-                    <FormControl><Input type="date" {...field} /></FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={form.control}
-                name="notes"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Notes (Optional)</FormLabel>
-                    <FormControl><Textarea {...field} value={field.value || ''} /></FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <Button type="submit" className="w-full" disabled={createReminder.isPending}>
-                {createReminder.isPending ? "Saving..." : "Save Reminder"}
-              </Button>
-            </form>
-          </Form>
-        </DialogContent>
-      </Dialog>
-
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-        <TabsList className="bg-card border h-11">
-          <TabsTrigger value="overdue" className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground gap-2">
-            Overdue
-            <Badge variant={overdueCount > 0 ? "destructive" : "secondary"} className={`ml-1 h-5 px-1.5 min-w-[20px] rounded-full ${overdueCount === 0 ? 'opacity-80' : ''}`}>
-              {overdueCount}
-            </Badge>
-          </TabsTrigger>
-          <TabsTrigger value="30" className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground gap-2">
-            Next 30 Days
-            <Badge variant="secondary" className="ml-1 opacity-80 h-5 px-1.5 min-w-[20px] rounded-full">
-              {renewals?.['30']?.length || 0}
-            </Badge>
-          </TabsTrigger>
-          <TabsTrigger value="60" className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground gap-2">
-            31-60 Days
-            <Badge variant="secondary" className="ml-1 opacity-80 h-5 px-1.5 min-w-[20px] rounded-full">
-              {renewals?.['60']?.length || 0}
-            </Badge>
-          </TabsTrigger>
-          <TabsTrigger value="90" className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground gap-2">
-            61-90 Days
-            <Badge variant="secondary" className="ml-1 opacity-80 h-5 px-1.5 min-w-[20px] rounded-full">
-              {renewals?.['90']?.length || 0}
-            </Badge>
-          </TabsTrigger>
-        </TabsList>
-        
-        <TabsContent value="overdue" className="space-y-4">
-          <div className="border rounded-md bg-card overflow-hidden">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Client</TableHead>
-                  <TableHead>Policy & Product</TableHead>
-                  <TableHead>Agent</TableHead>
-                  <TableHead className="text-right">Expiry Date</TableHead>
-                  <TableHead>Reminders</TableHead>
-                  {isOwnerOrManager && <TableHead className="text-center">Action</TableHead>}
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {isOverdueLoading ? (
-                   <TableRow><TableCell colSpan={isOwnerOrManager ? 6 : 5} className="text-center py-8">Loading overdue renewals...</TableCell></TableRow>
-                ) : !overdueRenewals || overdueRenewals.length === 0 ? (
-                   <TableRow><TableCell colSpan={isOwnerOrManager ? 6 : 5} className="text-center py-12 text-muted-foreground">No overdue policies.</TableCell></TableRow>
-                ) : (
-                  overdueRenewals.map(p => (
-                    <TableRow key={p.id}>
-                      <TableCell>
-                        <div className="font-medium">{p.client?.name ?? '—'}</div>
-                        <div className="text-xs text-muted-foreground">{p.client?.phone || p.client?.email || 'No contact info'}</div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="text-sm font-medium">{p.policy_number}</div>
-                        <div className="text-xs text-muted-foreground">{p.product_line?.name} • {p.insurer?.name}</div>
-                      </TableCell>
-                      <TableCell className="text-sm">{p.agent?.full_name}</TableCell>
-                      <TableCell className="text-right">
-                        <div className="font-medium text-destructive">
-                          {formatDate(p.expiry_date)}
-                        </div>
-                        <div className="text-xs font-bold text-destructive mt-1 flex items-center justify-end gap-1">
-                          <AlertTriangle className="w-3 h-3" />
-                          {p.days_overdue} days overdue
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        {(() => {
-                          const reminders = remindersMap?.[p.id] || [];
-                          if (reminders.length === 0) {
-                            return <span className="text-xs text-muted-foreground opacity-70">None</span>;
-                          }
-                          return (
-                            <Popover>
-                              <PopoverTrigger asChild>
-                                <Button variant="secondary" size="sm" className="h-6 px-2 text-xs">
-                                  {reminders.length} sent
-                                </Button>
-                              </PopoverTrigger>
-                              <PopoverContent className="w-64 p-3" align="start">
-                                <h4 className="font-semibold text-sm mb-2">Reminder History</h4>
-                                <div className="space-y-3 max-h-48 overflow-y-auto">
-                                  {reminders.map(r => (
-                                    <div key={r.id} className="text-sm space-y-1">
-                                      <div className="flex items-center gap-2 text-muted-foreground text-xs">
-                                        {getChannelIcon(r.channel)}
-                                        <span>{formatDate(r.reminder_date)}</span>
-                                      </div>
-                                      {r.notes && <p className="text-xs pl-5">{r.notes}</p>}
-                                    </div>
-                                  ))}
-                                </div>
-                              </PopoverContent>
-                            </Popover>
-                          );
-                        })()}
-                      </TableCell>
-                      {isOwnerOrManager && (
-                        <TableCell className="text-center">
-                          <Button size="sm" variant="outline" className="gap-2" onClick={() => {
-                            setReminderPolicyId(p.id);
-                            form.reset({
-                              channel: 'email',
-                              reminder_date: new Date().toISOString().split('T')[0],
-                              notes: ''
-                            });
-                          }}>
-                            <BellRing className="w-3 h-3" /> Log Reminder
-                          </Button>
-                        </TableCell>
-                      )}
-                    </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
-          </div>
-        </TabsContent>
-        <TabsContent value="30" className="space-y-4">
-          {renderTable(renewals?.['30'] || [])}
-        </TabsContent>
-        <TabsContent value="60" className="space-y-4">
-          {renderTable(renewals?.['60'] || [])}
-        </TabsContent>
-        <TabsContent value="90" className="space-y-4">
-          {renderTable(renewals?.['90'] || [])}
-        </TabsContent>
-      </Tabs>
+      <RenewalActionDialogs
+        action={action}
+        row={actionRow}
+        onClose={() => {
+          setAction(null);
+          setActionRow(null);
+        }}
+      />
+      <RenewalDrawer row={drawerRow} onClose={() => setDrawerRow(null)} />
     </div>
   );
 }

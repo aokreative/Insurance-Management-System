@@ -15,6 +15,8 @@ import { formatDate } from '@/lib/utils';
 import { InviteMemberDialog } from '@/components/team/InviteMemberDialog';
 import { RemoveMemberDialog } from '@/components/team/RemoveMemberDialog';
 import { AgentRatesDialog } from '@/components/team/AgentRatesDialog';
+import { Switch } from '@/components/ui/switch';
+import { useSetAgentsManageRenewals } from '@/hooks/renewals';
 import { usePendingInvites, useRevokeInvite, useChangeMemberRole, useClientCountsByAgent } from '@/hooks/team';
 import { useForm } from 'react-hook-form';
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
@@ -24,6 +26,7 @@ export default function Settings() {
   const updateAgency = useUpdateAgency();
   const { data: users, isLoading: usersLoading } = useAgencyUsers();
   const { toast } = useToast();
+  const setAgentsManage = useSetAgentsManageRenewals();
   const { data: invites } = usePendingInvites();
   const { data: clientCounts } = useClientCountsByAgent();
   const revokeInvite = useRevokeInvite();
@@ -157,6 +160,37 @@ export default function Settings() {
                   )}
                 </form>
               </Form>
+            </CardContent>
+          </Card>
+          <Card className="mt-6">
+            <CardHeader>
+              <CardTitle>Renewals</CardTitle>
+              <CardDescription>
+                Owners and managers can always update any renewal.{' '}
+                {isOwner ? 'Only you can change this setting.' : 'Only the owner can change this setting.'}
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="flex items-center justify-between gap-4">
+                <Label htmlFor="agents-manage-renewals" className="font-normal">
+                  Agents can update their own renewals
+                  <span className="block text-xs text-muted-foreground">
+                    Log contacts, record quotes, renew and mark lost on policies assigned to them.
+                  </span>
+                </Label>
+                <Switch
+                  id="agents-manage-renewals"
+                  checked={agency?.agents_manage_renewals ?? true}
+                  disabled={!isOwner || setAgentsManage.isPending}
+                  onCheckedChange={(checked) =>
+                    setAgentsManage.mutate(checked, {
+                      onSuccess: () =>
+                        toast({ title: checked ? 'Agents can now update their renewals' : 'Renewal updates by agents turned off' }),
+                      onError: (err) => toast({ title: 'Could not save', description: err.message, variant: 'destructive' }),
+                    })
+                  }
+                />
+              </div>
             </CardContent>
           </Card>
         </TabsContent>

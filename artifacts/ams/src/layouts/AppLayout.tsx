@@ -20,7 +20,6 @@ import {
 import { Button } from '@/components/ui/button';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
-import { addDays, startOfDay } from 'date-fns';
 import { useAgentRates, useHasOwnEarnings } from '@/hooks/payouts';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
@@ -39,17 +38,15 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   const { data: renewalsCount = 0 } = useQuery({
     queryKey: ['renewals-count', agency?.id],
     queryFn: async () => {
-      const today = startOfDay(new Date()).toISOString();
-      const in30Days = addDays(new Date(), 30).toISOString();
-      
+      // Open renewals expiring in the next 30 days (renewed/lost ones are done)
       const { count, error } = await supabase
-        .from('policies')
-        .select('*', { count: 'exact', head: true })
+        .from('renewal_pipeline')
+        .select('policy_id', { count: 'exact', head: true })
         .eq('agency_id', agency?.id)
-        .eq('status', 'active')
-        .gte('expiry_date', today)
-        .lte('expiry_date', in30Days);
-        
+        .in('stage', ['to_contact', 'contacted', 'quoted'])
+        .gte('days_to_expiry', 0)
+        .lte('days_to_expiry', 30);
+
       if (error) throw error;
       return count || 0;
     },
