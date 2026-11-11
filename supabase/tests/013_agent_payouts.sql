@@ -19,6 +19,8 @@
 -- ============================================================
 
 BEGIN;
+-- current_date here means "today in Nairobi", like the RPCs (013a)
+SET LOCAL TIME ZONE 'Africa/Nairobi';
 
 CREATE FUNCTION public._t013_expect(p_sql TEXT, p_msg TEXT, p_state TEXT DEFAULT NULL)
 RETURNS VOID
@@ -202,7 +204,7 @@ BEGIN
     PERFORM _t013_expect(format('SELECT set_agent_rates(%L, 40, %L)', a1,
               jsonb_build_array(jsonb_build_object('product_line_id', pl_l))),
             'Rate must be between 0 and 100');
-    PERFORM _t013_expect(format('SELECT set_agent_rates(%L, 40, ''[]'')', o2), 'Pick an active member of this agency');
+    PERFORM _t013_expect(format('SELECT set_agent_rates(%L, 40, ''[]'')', o2), 'Pick a member of this agency');
     PERFORM _t013_expect(format('SELECT set_agent_rates(%L, 40, %L)', a1,
               jsonb_build_array(jsonb_build_object('product_line_id', pl_x, 'rate', 10))),
             'Pick a product line of this agency');
@@ -265,7 +267,8 @@ BEGIN
       FROM agent_earnings WHERE allocation_id = al1 AND kind = 'reversal';
     ASSERT v_num = -400.00 AND v_base = -1000 AND v_rate = 40 AND v_uid = a1,
       format('undo before: reversal expected -400/-1000/40/a1, got %s/%s/%s/%s', v_num, v_base, v_rate, v_uid);
-    ASSERT v_date = current_date AND v_uid2 = e1, format('undo before: earned_on %s, reverses %s', v_date, v_uid2);
+    -- unpaid original: the reversal keeps its date (013a)
+    ASSERT v_date = DATE '2026-03-01' AND v_uid2 = e1, format('undo before: earned_on %s, reverses %s', v_date, v_uid2);
     ASSERT pay1 = p1 AND pay2 = c1 AND v_txt = 'T013-P1', format('undo before: snapshot %s / %s / %s', pay1, pay2, v_txt);
 
     r := preview_agent_payout(a1, current_date);
@@ -273,8 +276,10 @@ BEGIN
     ASSERT jsonb_array_length(r->'lines') = 2, format('undo before: expected 2 lines, got %s', r->'lines');
     ASSERT (r->'lines'->0) ?& ARRAY['id','kind','earned_on','policy_number','client_name','base_amount','rate','amount','note'],
       format('preview: line keys missing in %s', r->'lines'->0);
-    ASSERT r->'lines'->0->>'kind' = 'commission' AND r->'lines'->1->>'kind' = 'reversal',
-      format('preview: order by earned_on expected commission then reversal, got %s', r->'lines');
+    -- same earned_on and created_at (one transaction): order between them is by id
+    ASSERT (SELECT array_agg(x->>'kind' ORDER BY x->>'kind') FROM jsonb_array_elements(r->'lines') x)
+             = ARRAY['commission','reversal'],
+      format('preview: expected a commission and its reversal, got %s', r->'lines');
 
     PERFORM _t013_expect(format('SELECT create_agent_payout(%L, current_date, current_date, ''mpesa'', NULL)', a1),
             'Nothing to pay for this agent up to that date');
@@ -476,7 +481,8 @@ BEGIN
     adj := add_agent_adjustment(a1, 100, 'Final settlement');
     r := create_agent_payout(a1, current_date, current_date, 'cash', NULL);
     ASSERT (r->>'amount')::numeric = 100, format('deactivated: payout expected 100, got %s', r->>'amount');
-    PERFORM _t013_expect(format('SELECT set_agent_rates(%L, 40, ''[]'')', a1), 'Pick an active member of this agency');
+    -- rates can still be set for a removed member (013a)
+    PERFORM set_agent_rates(a1, 40, '[]'::jsonb);
 
     RAISE EXCEPTION USING ERRCODE = 'ZZ001';
   EXCEPTION WHEN SQLSTATE 'ZZ001' THEN NULL;
@@ -714,8 +720,8 @@ BEGIN
   ASSERT has_function_privilege('authenticated', 'public.add_agent_adjustment(uuid, numeric, text)', 'EXECUTE'), 'authenticated: add_agent_adjustment';
   ASSERT NOT has_function_privilege('anon', 'public.preview_agent_payout(uuid, date)', 'EXECUTE'), 'anon: preview_agent_payout';
   ASSERT has_function_privilege('authenticated', 'public.preview_agent_payout(uuid, date)', 'EXECUTE'), 'authenticated: preview_agent_payout';
-  ASSERT NOT has_function_privilege('anon', 'public.create_agent_payout(uuid, date, date, text, text)', 'EXECUTE'), 'anon: create_agent_payout';
-  ASSERT has_function_privilege('authenticated', 'public.create_agent_payout(uuid, date, date, text, text)', 'EXECUTE'), 'authenticated: create_agent_payout';
+  ASSERT NOT has_function_privilege('anon', 'public.create_agent_payout(uuid, date, date, text, text, numeric)', 'EXECUTE'), 'anon: create_agent_payout';
+  ASSERT has_function_privilege('authenticated', 'public.create_agent_payout(uuid, date, date, text, text, numeric)', 'EXECUTE'), 'authenticated: create_agent_payout';
   ASSERT NOT has_function_privilege('anon', 'public.void_agent_payout(uuid)', 'EXECUTE'), 'anon: void_agent_payout';
   ASSERT has_function_privilege('authenticated', 'public.void_agent_payout(uuid)', 'EXECUTE'), 'authenticated: void_agent_payout';
   ASSERT NOT has_function_privilege('authenticated', 'public._backfill_agent_earnings(uuid)', 'EXECUTE'), 'authenticated: _backfill_agent_earnings';

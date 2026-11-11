@@ -16,6 +16,10 @@
 --      preview_agent_payout, create_agent_payout, void_agent_payout;
 --      internal _backfill_agent_earnings (not called here: there
 --      are no rates yet, so existing allocations earn nothing).
+--
+-- Superseded in part by 013a_payout_followups.sql (expected-total
+-- guard on create_agent_payout, reversal and adjustment dating,
+-- removed members in set_agent_rates / remove_member).
 -- ============================================================
 
 -- ------------------------------------------------------------
