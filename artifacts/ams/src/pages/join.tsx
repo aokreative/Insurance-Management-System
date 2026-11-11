@@ -5,8 +5,9 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { BrandLockup } from '@/components/BrandLockup';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
-import { ShieldCheck, Loader2, AlertCircle } from 'lucide-react';
+import { Loader2, AlertCircle } from 'lucide-react';
 
 interface InvitePreview {
   agency_name: string;
@@ -26,10 +27,7 @@ function Shell({ children }: { children: React.ReactNode }) {
     <div className="min-h-screen bg-background flex flex-col justify-center items-center p-4">
       <div className="w-full max-w-md">
         <div className="flex justify-center mb-8">
-          <div className="flex items-center gap-2 text-primary">
-            <ShieldCheck className="w-10 h-10" />
-            <span className="text-3xl font-bold tracking-tight">AMS</span>
-          </div>
+          <BrandLockup />
         </div>
         <Card className="border-border/50 shadow-xl">{children}</Card>
       </div>

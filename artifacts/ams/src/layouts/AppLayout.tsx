@@ -28,6 +28,7 @@ import {
   SheetContent,
   SheetTrigger,
 } from "@/components/ui/sheet";
+import { BrandMark } from '@/components/BrandLockup';
 
 export function AppLayout({ children }: { children: React.ReactNode }) {
   const { agency, profile, signOut, session, isOwnerOrManager } = useAuth();
@@ -116,9 +117,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
       <aside className="hidden md:flex print:hidden flex-col w-64 bg-sidebar border-r border-sidebar-border shrink-0 fixed inset-y-0 z-20">
         <div className="h-14 flex items-center px-4 border-b border-sidebar-border/50 shrink-0">
           <div className="flex items-center gap-2 font-bold text-sidebar-foreground truncate">
-            <div className="w-6 h-6 rounded-sm bg-sidebar-primary flex items-center justify-center text-sidebar-primary-foreground text-xs">
-              {agency?.name?.charAt(0) || 'A'}
-            </div>
+            <BrandMark alt="AMS" className="h-7 w-7 shrink-0" />
             <span className="truncate">{agency?.name || 'Agency Workspace'}</span>
           </div>
         </div>
@@ -159,9 +158,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         {/* Mobile Header */}
         <header className="md:hidden print:hidden h-14 border-b bg-card flex items-center justify-between px-4 shrink-0 sticky top-0 z-10">
           <div className="flex items-center gap-2 font-bold truncate">
-            <div className="w-6 h-6 rounded-sm bg-primary flex items-center justify-center text-primary-foreground text-xs">
-              {agency?.name?.charAt(0) || 'A'}
-            </div>
+            <BrandMark alt="AMS" className="h-7 w-7 shrink-0" />
             <span className="truncate text-sm">{agency?.name || 'Agency Workspace'}</span>
           </div>
           

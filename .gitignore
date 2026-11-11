@@ -47,3 +47,7 @@ Thumbs.db
 # Local caches
 .cache/
 .local/
+
+# local env files
+.env.local
+.env.*.local
